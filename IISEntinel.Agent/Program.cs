@@ -6,6 +6,11 @@ using IISEntinel.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(5261);
+});
+
 // =========================
 // Serilog
 // =========================
