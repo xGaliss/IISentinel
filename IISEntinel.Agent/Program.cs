@@ -70,4 +70,26 @@ app.MapGet("/sites", () =>
     }
 });
 
+app.MapPost("/sites/{name}/start", (string name) =>
+{
+    using var serverManager = new ServerManager();
+    var site = serverManager.Sites[name];
+
+    if (site == null) return Results.NotFound();
+
+    site.Start();
+    return Results.Ok();
+});
+
+app.MapPost("/sites/{name}/stop", (string name) =>
+{
+    using var serverManager = new ServerManager();
+    var site = serverManager.Sites[name];
+
+    if (site == null) return Results.NotFound();
+
+    site.Stop();
+    return Results.Ok();
+});
+
 app.Run();
