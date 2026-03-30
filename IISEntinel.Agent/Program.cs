@@ -112,4 +112,30 @@ app.MapPost("/sites/{name}/stop", (string name) =>
     return Results.Ok();
 });
 
+_ = Task.Run(async () =>
+{
+    while (true)
+    {
+        try
+        {
+            using var serverManager = new ServerManager();
+
+            foreach (var pool in serverManager.ApplicationPools)
+            {
+                if (pool.State != ObjectState.Started)
+                {
+                    Console.WriteLine($"[AUTOHEAL] Starting pool {pool.Name}");
+                    pool.Start();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+
+        await Task.Delay(10000); // cada 10s
+    }
+});
+
 app.Run();
