@@ -1,25 +1,53 @@
-using Microsoft.Web.Administration;
 using Microsoft.Extensions.Options;
-using IISEntinel.Agent;
+using Microsoft.Web.Administration;
+using Serilog;
 using System.Collections.Concurrent;
+using IISEntinel.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Serilog
+var logsPath = builder.Configuration["Serilog:LogsPath"] ?? "Logs/iissentinel-.log";
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .Enrich.FromLogContext()
+    .WriteTo.File(
+        path: logsPath,
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        shared: true,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
+// Config
 builder.Services.Configure<AutoHealOptions>(
     builder.Configuration.GetSection("AutoHeal"));
 
 var app = builder.Build();
 
-var apiKey = builder.Configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey not configured.");
+var apiKey = builder.Configuration["ApiKey"]
+             ?? throw new InvalidOperationException("ApiKey not configured.");
+
 var autoHealOptions = app.Services.GetRequiredService<IOptions<AutoHealOptions>>().Value;
 
 // Historial simple en memoria para cooldown por pool
 var healTracker = new ConcurrentDictionary<string, HealState>();
 
+// Middleware de seguridad + auditoría básica
 app.Use(async (context, next) =>
 {
+    var path = context.Request.Path;
+    var method = context.Request.Method;
+    var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
     if (!context.Request.Headers.TryGetValue("x-api-key", out var key))
     {
+        Log.Warning("Auth failed: missing API key. Method={Method} Path={Path} RemoteIp={RemoteIp}",
+            method, path, remoteIp);
+
         context.Response.StatusCode = 401;
         await context.Response.WriteAsync("API Key missing");
         return;
@@ -27,15 +55,25 @@ app.Use(async (context, next) =>
 
     if (key != apiKey)
     {
+        Log.Warning("Auth failed: invalid API key. Method={Method} Path={Path} RemoteIp={RemoteIp}",
+            method, path, remoteIp);
+
         context.Response.StatusCode = 403;
         await context.Response.WriteAsync("Invalid API Key");
         return;
     }
 
+    Log.Information("API request authorized. Method={Method} Path={Path} RemoteIp={RemoteIp}",
+        method, path, remoteIp);
+
     await next();
 });
 
-app.MapGet("/", () => "IISEntinel Agent running");
+app.MapGet("/", () =>
+{
+    Log.Information("Health endpoint called.");
+    return "IISEntinel Agent running";
+});
 
 app.MapGet("/apppools", () =>
 {
@@ -51,10 +89,12 @@ app.MapGet("/apppools", () =>
             })
             .ToList();
 
+        Log.Information("Listed app pools. Count={Count}", pools.Count);
         return Results.Ok(pools);
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error listing app pools");
         return Results.Problem(ex.ToString());
     }
 });
@@ -67,14 +107,19 @@ app.MapPost("/apppools/{name}/recycle", (string name) =>
 
         var pool = serverManager.ApplicationPools[name];
         if (pool == null)
+        {
+            Log.Warning("Recycle requested for missing app pool {PoolName}", name);
             return Results.NotFound(new { message = "App pool not found" });
+        }
 
         pool.Recycle();
 
+        Log.Information("App pool recycled manually. Pool={PoolName}", name);
         return Results.Ok(new { message = $"Recycled {name}" });
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error recycling app pool {PoolName}", name);
         return Results.Problem(ex.ToString());
     }
 });
@@ -87,10 +132,14 @@ app.MapPost("/apppools/{name}/start", (string name) =>
 
         var pool = serverManager.ApplicationPools[name];
         if (pool == null)
+        {
+            Log.Warning("Start requested for missing app pool {PoolName}", name);
             return Results.NotFound(new { message = "App pool not found" });
+        }
 
         var result = pool.Start();
 
+        Log.Information("App pool start requested manually. Pool={PoolName} Result={Result}", name, result);
         return Results.Ok(new
         {
             message = $"Start attempted for {name}",
@@ -99,6 +148,7 @@ app.MapPost("/apppools/{name}/start", (string name) =>
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error starting app pool {PoolName}", name);
         return Results.Problem(ex.ToString());
     }
 });
@@ -111,10 +161,14 @@ app.MapPost("/apppools/{name}/stop", (string name) =>
 
         var pool = serverManager.ApplicationPools[name];
         if (pool == null)
+        {
+            Log.Warning("Stop requested for missing app pool {PoolName}", name);
             return Results.NotFound(new { message = "App pool not found" });
+        }
 
         var result = pool.Stop();
 
+        Log.Information("App pool stop requested manually. Pool={PoolName} Result={Result}", name, result);
         return Results.Ok(new
         {
             message = $"Stop attempted for {name}",
@@ -123,6 +177,7 @@ app.MapPost("/apppools/{name}/stop", (string name) =>
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error stopping app pool {PoolName}", name);
         return Results.Problem(ex.ToString());
     }
 });
@@ -142,10 +197,12 @@ app.MapGet("/sites", () =>
             })
             .ToList();
 
+        Log.Information("Listed sites. Count={Count}", sites.Count);
         return Results.Ok(sites);
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error listing sites");
         return Results.Problem(ex.ToString());
     }
 });
@@ -158,10 +215,14 @@ app.MapPost("/sites/{name}/start", (string name) =>
 
         var site = serverManager.Sites[name];
         if (site == null)
+        {
+            Log.Warning("Start requested for missing site {SiteName}", name);
             return Results.NotFound(new { message = "Site not found" });
+        }
 
         var result = site.Start();
 
+        Log.Information("Site start requested manually. Site={SiteName} Result={Result}", name, result);
         return Results.Ok(new
         {
             message = $"Start attempted for {name}",
@@ -170,6 +231,7 @@ app.MapPost("/sites/{name}/start", (string name) =>
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error starting site {SiteName}", name);
         return Results.Problem(ex.ToString());
     }
 });
@@ -182,10 +244,14 @@ app.MapPost("/sites/{name}/stop", (string name) =>
 
         var site = serverManager.Sites[name];
         if (site == null)
+        {
+            Log.Warning("Stop requested for missing site {SiteName}", name);
             return Results.NotFound(new { message = "Site not found" });
+        }
 
         var result = site.Stop();
 
+        Log.Information("Site stop requested manually. Site={SiteName} Result={Result}", name, result);
         return Results.Ok(new
         {
             message = $"Stop attempted for {name}",
@@ -194,6 +260,7 @@ app.MapPost("/sites/{name}/stop", (string name) =>
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Error stopping site {SiteName}", name);
         return Results.Problem(ex.ToString());
     }
 });
@@ -201,6 +268,11 @@ app.MapPost("/sites/{name}/stop", (string name) =>
 // Auto-heal
 if (autoHealOptions.Enabled)
 {
+    Log.Information("Auto-heal enabled. IntervalSeconds={Interval} MaxAttempts={MaxAttempts} CooldownMinutes={CooldownMinutes}",
+        autoHealOptions.CheckIntervalSeconds,
+        autoHealOptions.MaxAttempts,
+        autoHealOptions.CooldownMinutes);
+
     _ = Task.Run(async () =>
     {
         while (true)
@@ -217,7 +289,7 @@ if (autoHealOptions.Enabled)
                         continue;
                     }
 
-                    Console.WriteLine($"[CHECK] Pool {pool.Name} - State: {pool.State}");
+                    Log.Information("Pool check. Pool={PoolName} State={State}", pool.Name, pool.State);
 
                     if (pool.State != ObjectState.Stopped)
                         continue;
@@ -231,37 +303,56 @@ if (autoHealOptions.Enabled)
                     {
                         state.WindowStartUtc = now;
                         state.Attempts = 0;
+                        Log.Information("Auto-heal window reset. Pool={PoolName}", pool.Name);
                     }
 
                     if (state.Attempts >= autoHealOptions.MaxAttempts)
                     {
-                        Console.WriteLine($"[AUTOHEAL] Max attempts reached for {pool.Name}. Cooldown active until {state.WindowStartUtc.Add(cooldownWindow):u}");
+                        Log.Warning(
+                            "Auto-heal blocked by cooldown. Pool={PoolName} Attempts={Attempts} WindowStartUtc={WindowStartUtc}",
+                            pool.Name, state.Attempts, state.WindowStartUtc);
+
                         continue;
                     }
 
-                    Console.WriteLine($"[AUTOHEAL] Attempting to start pool {pool.Name}");
+                    Log.Warning("Auto-heal attempting start. Pool={PoolName} Attempt={Attempt}",
+                        pool.Name, state.Attempts + 1);
 
                     var result = pool.Start();
                     state.Attempts++;
 
-                    Console.WriteLine($"[AUTOHEAL] Start() result for {pool.Name}: {result}");
-                    Console.WriteLine($"[AUTOHEAL] Attempt #{state.Attempts} in current window for {pool.Name}");
-
-                    // Releer estado en la siguiente vuelta es suficiente, pero dejamos traza
-                    Console.WriteLine($"[AUTOHEAL] Current state after start attempt for {pool.Name}: {pool.State}");
+                    Log.Information(
+                        "Auto-heal start attempted. Pool={PoolName} Result={Result} AttemptsInWindow={Attempts} CurrentState={State}",
+                        pool.Name, result, state.Attempts, pool.State);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] {ex}");
+                Log.Error(ex, "Unhandled error in auto-heal loop");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(autoHealOptions.CheckIntervalSeconds));
         }
     });
 }
+else
+{
+    Log.Information("Auto-heal disabled.");
+}
 
-app.Run();
+try
+{
+    Log.Information("Starting IISEntinel Agent");
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "IISEntinel Agent terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 sealed class HealState
 {
