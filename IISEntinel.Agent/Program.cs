@@ -87,29 +87,57 @@ app.MapGet("/logs/recent", () =>
     try
     {
         if (!Directory.Exists(logsDir))
-            return Results.NotFound("Logs folder not found");
+        {
+            return Results.Ok(new
+            {
+                LogsDir = logsDir,
+                Exists = false,
+                Files = Array.Empty<string>()
+            });
+        }
 
-        var latestFile = Directory.GetFiles(logsDir, "iissentinel-*.log")
+        var files = Directory.GetFiles(logsDir, "iissentinel-*.log")
             .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-
-        if (latestFile == null)
-            return Results.NotFound("No log files");
-
-        var lines = File.ReadAllLines(latestFile)
-            .TakeLast(100)
             .ToList();
+
+        if (files.Count == 0)
+        {
+            return Results.Ok(new
+            {
+                LogsDir = logsDir,
+                Exists = true,
+                Files = Array.Empty<string>()
+            });
+        }
+
+        var latestFile = files.First();
+
+        List<string> lines;
+        using (var stream = new FileStream(latestFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var reader = new StreamReader(stream))
+        {
+            var content = reader.ReadToEnd();
+            lines = content
+                .Split(Environment.NewLine, StringSplitOptions.None)
+                .TakeLast(100)
+                .ToList();
+        }
 
         return Results.Ok(new
         {
-            File = Path.GetFileName(latestFile),
+            LogsDir = logsDir,
+            File = latestFile,
+            Files = files.Select(Path.GetFileName).ToList(),
             Lines = lines
         });
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Error reading logs from {LogsDir}", logsDir);
-        return Results.Problem(ex.ToString());
+        return Results.Ok(new
+        {
+            Error = ex.ToString(),
+            LogsDir = logsDir
+        });
     }
 });
 
