@@ -2,6 +2,26 @@ using Microsoft.Web.Administration;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+const string API_KEY = "1234";
+
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Headers.TryGetValue("x-api-key", out var key))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("API Key missing");
+        return;
+    }
+
+    if (key != API_KEY)
+    {
+        context.Response.StatusCode = 403;
+        await context.Response.WriteAsync("Invalid API Key");
+        return;
+    }
+
+    await next();
+});
 
 app.MapGet("/", () => "IISEntinel Agent running");
 
