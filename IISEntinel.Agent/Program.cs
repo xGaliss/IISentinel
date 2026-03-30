@@ -112,6 +112,8 @@ app.MapPost("/sites/{name}/stop", (string name) =>
     return Results.Ok();
 });
 
+
+
 _ = Task.Run(async () =>
 {
     while (true)
@@ -122,19 +124,25 @@ _ = Task.Run(async () =>
 
             foreach (var pool in serverManager.ApplicationPools)
             {
+                Console.WriteLine($"[CHECK] Pool {pool.Name} - State: {pool.State}");
+
                 if (pool.State != ObjectState.Started)
                 {
-                    Console.WriteLine($"[AUTOHEAL] Starting pool {pool.Name}");
-                    pool.Start();
+                    Console.WriteLine($"[AUTOHEAL] Attempting to start pool {pool.Name}");
+
+                    var result = pool.Start();
+
+                    Console.WriteLine($"[AUTOHEAL] Start() result for {pool.Name}: {result}");
+                    Console.WriteLine($"[AUTOHEAL] New state for {pool.Name}: {pool.State}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error: {ex.Message}");
+            Console.WriteLine($"[ERROR] {ex}");
         }
 
-        await Task.Delay(10000); // cada 10s
+        await Task.Delay(10000);
     }
 });
 
