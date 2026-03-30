@@ -6,9 +6,14 @@ using IISEntinel.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// =========================
 // Serilog
+// =========================
 var logsRelativePath = builder.Configuration["Serilog:LogsPath"] ?? "Logs/iissentinel-.log";
 var logsPath = Path.Combine(builder.Environment.ContentRootPath, logsRelativePath);
+var logsDir = Path.GetDirectoryName(logsPath) ?? Path.Combine(builder.Environment.ContentRootPath, "Logs");
+
+Directory.CreateDirectory(logsDir);
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -23,7 +28,9 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
+// =========================
 // Config
+// =========================
 builder.Services.Configure<AutoHealOptions>(
     builder.Configuration.GetSection("AutoHeal"));
 
@@ -37,7 +44,9 @@ var autoHealOptions = app.Services.GetRequiredService<IOptions<AutoHealOptions>>
 // Historial simple en memoria para cooldown por pool
 var healTracker = new ConcurrentDictionary<string, HealState>();
 
+// =========================
 // Middleware de seguridad + auditoría básica
+// =========================
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
@@ -70,14 +79,13 @@ app.Use(async (context, next) =>
     await next();
 });
 
-
-//LOGS
+// =========================
+// Logs
+// =========================
 app.MapGet("/logs/recent", () =>
 {
     try
     {
-        var logsDir = Path.Combine(builder.Environment.ContentRootPath, "Logs");
-
         if (!Directory.Exists(logsDir))
             return Results.NotFound("Logs folder not found");
 
@@ -100,17 +108,23 @@ app.MapGet("/logs/recent", () =>
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Error reading logs");
+        Log.Error(ex, "Error reading logs from {LogsDir}", logsDir);
         return Results.Problem(ex.ToString());
     }
 });
 
+// =========================
+// Health
+// =========================
 app.MapGet("/", () =>
 {
     Log.Information("Health endpoint called.");
     return "IISEntinel Agent running";
 });
 
+// =========================
+// App Pools
+// =========================
 app.MapGet("/apppools", () =>
 {
     try
@@ -218,6 +232,9 @@ app.MapPost("/apppools/{name}/stop", (string name) =>
     }
 });
 
+// =========================
+// Sites
+// =========================
 app.MapGet("/sites", () =>
 {
     try
@@ -301,7 +318,9 @@ app.MapPost("/sites/{name}/stop", (string name) =>
     }
 });
 
+// =========================
 // Auto-heal
+// =========================
 if (autoHealOptions.Enabled)
 {
     Log.Information("Auto-heal enabled. IntervalSeconds={Interval} MaxAttempts={MaxAttempts} CooldownMinutes={CooldownMinutes}",
