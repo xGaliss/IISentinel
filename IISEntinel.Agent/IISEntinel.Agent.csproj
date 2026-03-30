@@ -1,18 +1,13 @@
-{
-"ApiKey": "1234",
-"AutoHeal": {
-"Enabled": true,
-"CheckIntervalSeconds": 10,
-"Pools": [
-"DefaultAppPool"
-],
-"MaxAttempts": 3,
-"CooldownMinutes": 10
-},
-"Logging": {
-"LogLevel": {
-"Default": "Information",
-"Microsoft.AspNetCore": "Warning"
-}
-}
-}
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net9.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Web.Administration" Version="11.1.0" />
+	</ItemGroup>
+
+</Project>
