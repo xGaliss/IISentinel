@@ -1,0 +1,6 @@
+@IISEntinel.Agent_HostAddress = http://localhost:5261
+
+GET {{IISEntinel.Agent_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

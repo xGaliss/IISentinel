@@ -1,0 +1,66 @@
+# .NET / Visual Studio
+bin/
+obj/
+publish/
+*.publish/
+
+# VS
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# IIS / Web
+.vs/config/applicationhost.config
+
+# Local config
+appsettings.Development.json
+appsettings.Local.json
+
+# Certificates / Secrets
+*.pfx
+*.key
+*.pem
+secrets.json
+
+# Runtime / Generated
+*.exe
+*.dll
+*.pdb
+*.runtimeconfig.json
+*.deps.json
+
+# Logs & dumps
+logs/
+*.dmp
+
+# Node
+node_modules/
+dist/
+build/
+
+# Others
+*.zip
+*.tar.gz
+*.7z
