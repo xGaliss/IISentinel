@@ -69,6 +69,36 @@ app.Use(async (context, next) =>
     await next();
 });
 
+
+//LOGS
+app.MapGet("/logs/recent", () =>
+{
+    try
+    {
+        var logsDir = Path.Combine(AppContext.BaseDirectory, "Logs");
+
+        if (!Directory.Exists(logsDir))
+            return Results.NotFound("Logs folder not found");
+
+        var latestFile = Directory.GetFiles(logsDir, "iissentinel-*.log")
+            .OrderByDescending(f => f)
+            .FirstOrDefault();
+
+        if (latestFile == null)
+            return Results.NotFound("No log files");
+
+        var lines = File.ReadAllLines(latestFile)
+            .TakeLast(100); // últimas 100 líneas
+
+        return Results.Ok(lines);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Error reading logs");
+        return Results.Problem(ex.ToString());
+    }
+});
+
 app.MapGet("/", () =>
 {
     Log.Information("Health endpoint called.");
