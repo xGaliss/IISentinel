@@ -47,4 +47,27 @@ app.MapPost("/apppools/{name}/recycle", (string name) =>
     }
 });
 
+app.MapGet("/sites", () =>
+{
+    try
+    {
+        using var serverManager = new ServerManager();
+
+        var sites = serverManager.Sites
+            .Select(s => new
+            {
+                Name = s.Name,
+                State = s.State.ToString(),
+                Bindings = s.Bindings.Select(b => b.BindingInformation)
+            })
+            .ToList();
+
+        return Results.Ok(sites);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString());
+    }
+});
+
 app.Run();
