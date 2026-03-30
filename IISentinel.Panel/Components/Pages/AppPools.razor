@@ -1,0 +1,132 @@
+﻿@page "/apppools"
+@using IISentinel.Panel.Models
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>App Pools</PageTitle>
+
+<h1>App Pools</h1>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger">@ErrorMessage</div>
+}
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="LoadAppPoolsAsync" disabled="@IsLoading">
+        @(IsLoading ? "Loading..." : "Refresh")
+    </button>
+</div>
+
+@if (Pools.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <p>No app pools found.</p>
+}
+else if (Pools.Count > 0)
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th style="width: 320px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var pool in Pools)
+            {
+                <tr>
+                    <td>@pool.Name</td>
+                    <td>@pool.State</td>
+                    <td>
+                        <button class="btn btn-success btn-sm me-2"
+                                @onclick="() => StartPoolAsync(pool.Name)">
+                            Start
+                        </button>
+
+                        <button class="btn btn-warning btn-sm me-2"
+                                @onclick="() => StopPoolAsync(pool.Name)">
+                            Stop
+                        </button>
+
+                        <button class="btn btn-danger btn-sm"
+                                @onclick="() => RecyclePoolAsync(pool.Name)">
+                            Recycle
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<AppPoolDto> Pools { get; set; } = new();
+    private bool IsLoading { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAppPoolsAsync();
+    }
+
+    private async Task LoadAppPoolsAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+
+            var client = HttpClientFactory.CreateClient("Agent");
+            var result = await client.GetFromJsonAsync<List<AppPoolDto>>("/apppools");
+
+            Pools = result ?? new List<AppPoolDto>();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading app pools: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task StartPoolAsync(string name)
+    {
+        await PostActionAsync($"/apppools/{Uri.EscapeDataString(name)}/start");
+    }
+
+    private async Task StopPoolAsync(string name)
+    {
+        await PostActionAsync($"/apppools/{Uri.EscapeDataString(name)}/stop");
+    }
+
+    private async Task RecyclePoolAsync(string name)
+    {
+        await PostActionAsync($"/apppools/{Uri.EscapeDataString(name)}/recycle");
+    }
+
+    private async Task PostActionAsync(string url)
+    {
+        try
+        {
+            ErrorMessage = null;
+
+            var client = HttpClientFactory.CreateClient("Agent");
+            var response = await client.PostAsync(url, content: null);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                ErrorMessage = $"Action failed: {(int)response.StatusCode} - {body}";
+                return;
+            }
+
+            await LoadAppPoolsAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Action error: {ex.Message}";
+        }
+    }
+}
