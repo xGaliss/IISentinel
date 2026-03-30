@@ -7,7 +7,8 @@ using IISEntinel.Agent;
 var builder = WebApplication.CreateBuilder(args);
 
 // Serilog
-var logsPath = builder.Configuration["Serilog:LogsPath"] ?? "Logs/iissentinel-.log";
+var logsRelativePath = builder.Configuration["Serilog:LogsPath"] ?? "Logs/iissentinel-.log";
+var logsPath = Path.Combine(builder.Environment.ContentRootPath, logsRelativePath);
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -75,22 +76,27 @@ app.MapGet("/logs/recent", () =>
 {
     try
     {
-        var logsDir = Path.Combine(AppContext.BaseDirectory, "Logs");
+        var logsDir = Path.Combine(builder.Environment.ContentRootPath, "Logs");
 
         if (!Directory.Exists(logsDir))
             return Results.NotFound("Logs folder not found");
 
         var latestFile = Directory.GetFiles(logsDir, "iissentinel-*.log")
-            .OrderByDescending(f => f)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
 
         if (latestFile == null)
             return Results.NotFound("No log files");
 
         var lines = File.ReadAllLines(latestFile)
-            .TakeLast(100); // últimas 100 líneas
+            .TakeLast(100)
+            .ToList();
 
-        return Results.Ok(lines);
+        return Results.Ok(new
+        {
+            File = Path.GetFileName(latestFile),
+            Lines = lines
+        });
     }
     catch (Exception ex)
     {
