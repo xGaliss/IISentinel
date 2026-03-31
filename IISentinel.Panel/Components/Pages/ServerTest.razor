@@ -1,0 +1,22 @@
+﻿@page "/server-test"
+@inject IISentinel.Panel.Services.IAgentApiClient AgentApiClient
+@rendermode InteractiveServer
+@using IISentinel.Panel.Models
+@inject IHttpClientFactory HttpClientFactory
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<h3>Server test</h3>
+
+<button @onclick="LoadAppPools">Cargar AppPools srv01</button>
+
+<pre>@result</pre>
+
+@code {
+    private string result = "Sin cargar";
+
+    private async Task LoadAppPools()
+    {
+        result = await AgentApiClient.GetAppPoolsRawAsync("srv01");
+    }
+}

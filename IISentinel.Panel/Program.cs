@@ -1,16 +1,28 @@
 using IISentinel.Panel.Components;
+using IISentinel.Panel.Configuration;
+using IISentinel.Panel.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<ManagedServersOptions>(
+    builder.Configuration.GetSection("ManagedServers"));
+
+builder.Services.AddSingleton<IServerRegistry, ServerRegistry>();
+
+builder.Services.AddScoped<IAgentApiClient, AgentApiClient>();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddHttpClient("Agent", client =>
-{
-    client.BaseAddress = new Uri(builder.Configuration["Agent:BaseUrl"]!);
-    client.DefaultRequestHeaders.Add("x-api-key", builder.Configuration["Agent:ApiKey"]!);
-});
+builder.Services.AddHttpClient("Agent")
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+        };
+    });
 
 var app = builder.Build();
 

@@ -3,6 +3,8 @@ using Microsoft.Web.Administration;
 using Serilog;
 using System.Collections.Concurrent;
 using IISEntinel.Agent;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +40,8 @@ builder.Host.UseSerilog();
 // =========================
 builder.Services.Configure<AutoHealOptions>(
     builder.Configuration.GetSection("AutoHeal"));
+builder.Services.Configure<CentralOptions>(
+    builder.Configuration.GetSection("Central"));
 
 var app = builder.Build();
 
@@ -45,6 +49,7 @@ var apiKey = builder.Configuration["ApiKey"]
              ?? throw new InvalidOperationException("ApiKey not configured.");
 
 var autoHealOptions = app.Services.GetRequiredService<IOptions<AutoHealOptions>>().Value;
+var centralOptions = app.Services.GetRequiredService<IOptions<CentralOptions>>().Value;
 
 // Historial simple en memoria para cooldown por pool
 var healTracker = new ConcurrentDictionary<string, HealState>();
@@ -475,7 +480,14 @@ else
 {
     Log.Information("Auto-heal disabled.");
 }
-
+try
+{
+    await TryEnrollWithCentralAsync(centralOptions);
+}
+catch (Exception ex)
+{
+    Log.Warning(ex, "Central enrollment attempt failed during startup.");
+}
 try
 {
     Log.Information("Starting IISEntinel Agent");
@@ -488,6 +500,125 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+
+static async Task TryEnrollWithCentralAsync(CentralOptions centralOptions)
+{
+    if (string.IsNullOrWhiteSpace(centralOptions.BaseUrl) ||
+        string.IsNullOrWhiteSpace(centralOptions.EnrollmentToken))
+    {
+        Log.Warning("Central enrollment skipped: Central:BaseUrl or Central:EnrollmentToken is missing.");
+        return;
+    }
+
+    var identity = await LoadOrCreateIdentityAsync();
+
+    var hostname = Environment.MachineName;
+    var fqdn = GetFqdn();
+
+    var request = new AgentEnrollRequest
+    {
+        EnrollmentToken = centralOptions.EnrollmentToken,
+        AgentIdentifier = identity.AgentIdentifier,
+        Hostname = hostname,
+        Fqdn = fqdn,
+        AgentVersion = "0.1.0"
+    };
+
+    using var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
+    using var client = new HttpClient(handler)
+    {
+        BaseAddress = new Uri(centralOptions.BaseUrl)
+    };
+
+    Log.Information("Attempting enrollment with Central. BaseUrl={BaseUrl} AgentIdentifier={AgentIdentifier}",
+        centralOptions.BaseUrl, identity.AgentIdentifier);
+
+    var response = await client.PostAsJsonAsync("/api/agents/enroll", request);
+
+    var responseText = await response.Content.ReadAsStringAsync();
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Log.Warning("Central enrollment failed. StatusCode={StatusCode} Response={Response}",
+            (int)response.StatusCode, responseText);
+        return;
+    }
+
+    var enrollResponse = await response.Content.ReadFromJsonAsync<AgentEnrollResponse>();
+
+    if (enrollResponse == null)
+    {
+        Log.Warning("Central enrollment returned empty or invalid JSON. Response={Response}", responseText);
+        return;
+    }
+
+    Log.Information("Central enrollment successful. AgentId={AgentId} Status={Status}",
+        enrollResponse.AgentId, enrollResponse.Status);
+}
+
+static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
+{
+    var identityDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "IISEntinel");
+
+    var identityPath = Path.Combine(identityDir, "agent.identity.json");
+
+    Directory.CreateDirectory(identityDir);
+
+    if (File.Exists(identityPath))
+    {
+        try
+        {
+            var json = await File.ReadAllTextAsync(identityPath);
+            var existing = System.Text.Json.JsonSerializer.Deserialize<AgentIdentity>(json);
+
+            if (existing != null && !string.IsNullOrWhiteSpace(existing.AgentIdentifier))
+            {
+                return existing;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to read existing agent identity. A new one will be created.");
+        }
+    }
+
+    var identity = new AgentIdentity
+    {
+        AgentIdentifier = Guid.NewGuid().ToString("D"),
+        CreatedUtc = DateTime.UtcNow
+    };
+
+    var newJson = System.Text.Json.JsonSerializer.Serialize(identity, new System.Text.Json.JsonSerializerOptions
+    {
+        WriteIndented = true
+    });
+
+    await File.WriteAllTextAsync(identityPath, newJson);
+
+    Log.Information("Created new agent identity. AgentIdentifier={AgentIdentifier} Path={Path}",
+        identity.AgentIdentifier, identityPath);
+
+    return identity;
+}
+
+static string GetFqdn()
+{
+    try
+    {
+        return System.Net.Dns.GetHostEntry(Environment.MachineName).HostName;
+    }
+    catch
+    {
+        return Environment.MachineName;
+    }
 }
 
 sealed class HealState
