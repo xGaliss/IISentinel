@@ -1,5 +1,6 @@
 using IISEntinel.Central.Data;
 using IISEntinel.Central.Endpoints;
+using IISEntinel.Central.Models;
 using IISEntinel.Central.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +10,9 @@ builder.WebHost.UseUrls("https://0.0.0.0:7016", "http://0.0.0.0:5008");
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
 builder.Services.AddScoped<IAgentService, AgentService>();
+
 builder.Services.AddServerSideBlazor()
     .AddCircuitOptions(options =>
     {
@@ -30,43 +33,22 @@ app.UseAntiforgery();
 app.MapRazorComponents<IISEntinel.Central.Components.App>()
     .AddInteractiveServerRenderMode();
 
+// API endpoints
 app.MapAgentEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapAgentActionEndpoints();
-
-app.MapPost("/api/agents/{id:guid}/approve", async (Guid id, CentralDbContext db) =>
-{
-    var agent = await db.Agents.FirstOrDefaultAsync(x => x.Id == id);
-    if (agent is null)
-        return Results.NotFound();
-
-    if (agent.Status != "Approved")
-    {
-        agent.Status = "Approved";
-        agent.ApprovedUtc = DateTime.UtcNow;
-        agent.RevokedUtc = null;
-
-        await db.SaveChangesAsync();
-    }
-
-    return Results.Ok(new
-    {
-        agent.Id,
-        agent.AgentIdentifier,
-        agent.Status,
-        agent.ApprovedUtc
-    });
-});
-
+app.MapAgentInventoryEndpoints();
 
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<CentralDbContext>();
-    db.Database.EnsureCreated();
+
+    // IMPORTANTE: usa migraciones en lugar de EnsureCreated
+    db.Database.Migrate();
 
     if (!db.EnrollmentTokens.Any(t => t.TokenHash == "test"))
     {
-        db.EnrollmentTokens.Add(new IISEntinel.Central.Models.EnrollmentToken
+        db.EnrollmentTokens.Add(new EnrollmentToken
         {
             Id = Guid.NewGuid(),
             Name = "Token inicial",

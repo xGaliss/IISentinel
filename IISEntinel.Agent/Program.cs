@@ -495,6 +495,7 @@ catch (Exception ex)
 
 await StartHeartbeatLoopAsync(centralOptions);
 await StartCommandPollingLoopAsync(centralOptions);
+await StartInventorySyncLoopAsync(centralOptions);
 
 try
 {
@@ -642,65 +643,6 @@ static async Task SendHeartbeatAsync(CentralOptions centralOptions)
 
     Log.Information("Heartbeat sent successfully. AgentIdentifier={AgentIdentifier}",
         identity.AgentIdentifier);
-}
-
-static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
-{
-    var identityDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "IISEntinel");
-
-    var identityPath = Path.Combine(identityDir, "agent.identity.json");
-
-    Directory.CreateDirectory(identityDir);
-
-    if (File.Exists(identityPath))
-    {
-        try
-        {
-            var json = await File.ReadAllTextAsync(identityPath);
-            var existing = JsonSerializer.Deserialize<AgentIdentity>(json);
-
-            if (existing != null && !string.IsNullOrWhiteSpace(existing.AgentIdentifier))
-            {
-                return existing;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to read existing agent identity. A new one will be created.");
-        }
-    }
-
-    var identity = new AgentIdentity
-    {
-        AgentIdentifier = Guid.NewGuid().ToString("D"),
-        CreatedUtc = DateTime.UtcNow
-    };
-
-    var newJson = JsonSerializer.Serialize(identity, new JsonSerializerOptions
-    {
-        WriteIndented = true
-    });
-
-    await File.WriteAllTextAsync(identityPath, newJson);
-
-    Log.Information("Created new agent identity. AgentIdentifier={AgentIdentifier} Path={Path}",
-        identity.AgentIdentifier, identityPath);
-
-    return identity;
-}
-
-static string GetFqdn()
-{
-    try
-    {
-        return System.Net.Dns.GetHostEntry(Environment.MachineName).HostName;
-    }
-    catch
-    {
-        return Environment.MachineName;
-    }
 }
 
 static Task StartCommandPollingLoopAsync(CentralOptions centralOptions)
@@ -868,6 +810,148 @@ static string ExecuteLocalCommand(AgentCommandDto command)
 
         default:
             throw new InvalidOperationException($"Unsupported action type '{command.ActionType}'.");
+    }
+}
+
+static Task StartInventorySyncLoopAsync(CentralOptions centralOptions)
+{
+    _ = Task.Run(async () =>
+    {
+        while (true)
+        {
+            try
+            {
+                await SyncInventoryAsync(centralOptions);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Inventory sync loop iteration failed.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(30));
+        }
+    });
+
+    return Task.CompletedTask;
+}
+
+static async Task SyncInventoryAsync(CentralOptions centralOptions)
+{
+    if (string.IsNullOrWhiteSpace(centralOptions.BaseUrl))
+    {
+        Log.Warning("Inventory sync skipped: Central:BaseUrl is missing.");
+        return;
+    }
+
+    var identity = await LoadOrCreateIdentityAsync();
+
+    AgentInventorySyncRequest request;
+    using (var serverManager = new ServerManager())
+    {
+        request = new AgentInventorySyncRequest
+        {
+            AppPools = serverManager.ApplicationPools
+                .Select(p => new AppPoolSnapshotDto
+                {
+                    Name = p.Name,
+                    State = p.State.ToString()
+                })
+                .ToList(),
+            Sites = serverManager.Sites
+                .Select(s => new SiteSnapshotDto
+                {
+                    Name = s.Name,
+                    State = s.State.ToString(),
+                    Bindings = s.Bindings.Select(b => b.BindingInformation).ToList()
+                })
+                .ToList()
+        };
+    }
+
+    using var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
+    using var client = new HttpClient(handler)
+    {
+        BaseAddress = new Uri(centralOptions.BaseUrl),
+        Timeout = TimeSpan.FromSeconds(20)
+    };
+
+    var response = await client.PostAsJsonAsync(
+        $"/api/agents/{identity.AgentIdentifier}/inventory",
+        request);
+
+    var responseText = await response.Content.ReadAsStringAsync();
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Log.Warning("Inventory sync rejected. StatusCode={StatusCode} Response={Response}",
+            (int)response.StatusCode, responseText);
+        return;
+    }
+
+    Log.Information("Inventory sync sent successfully. AgentIdentifier={AgentIdentifier} Pools={PoolCount} Sites={SiteCount}",
+        identity.AgentIdentifier, request.AppPools.Count, request.Sites.Count);
+}
+static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
+{
+    var identityDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "IISEntinel");
+
+    var identityPath = Path.Combine(identityDir, "agent.identity.json");
+
+    Directory.CreateDirectory(identityDir);
+
+    if (File.Exists(identityPath))
+    {
+        try
+        {
+            var json = await File.ReadAllTextAsync(identityPath);
+            var existing = JsonSerializer.Deserialize<AgentIdentity>(json);
+
+            if (existing != null && !string.IsNullOrWhiteSpace(existing.AgentIdentifier))
+            {
+                return existing;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to read existing agent identity. A new one will be created.");
+        }
+    }
+
+    var identity = new AgentIdentity
+    {
+        AgentIdentifier = Guid.NewGuid().ToString("D"),
+        CreatedUtc = DateTime.UtcNow
+    };
+
+    var newJson = JsonSerializer.Serialize(identity, new JsonSerializerOptions
+    {
+        WriteIndented = true
+    });
+
+    await File.WriteAllTextAsync(identityPath, newJson);
+
+    Log.Information("Created new agent identity. AgentIdentifier={AgentIdentifier} Path={Path}",
+        identity.AgentIdentifier, identityPath);
+
+    return identity;
+}
+
+static string GetFqdn()
+{
+    try
+    {
+        return System.Net.Dns.GetHostEntry(Environment.MachineName).HostName;
+    }
+    catch
+    {
+        return Environment.MachineName;
     }
 }
 

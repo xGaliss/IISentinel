@@ -7,9 +7,9 @@ public class AgentAction
     public Guid AgentId { get; set; }
     public Agent Agent { get; set; } = null!;
 
-    public string ActionType { get; set; } = "";   // AppPoolRecycle, AppPoolStart, SiteStop...
-    public string TargetName { get; set; } = "";   // DefaultAppPool, MiSite...
-    public string Status { get; set; } = "Pending"; // Pending, InProgress, Succeeded, Failed
+    public string ActionType { get; set; } = "";
+    public string TargetName { get; set; } = "";
+    public string Status { get; set; } = "Pending";
 
     public string RequestedBy { get; set; } = "CentralUI";
     public string? ResultMessage { get; set; }

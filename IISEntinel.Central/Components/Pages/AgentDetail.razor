@@ -1,0 +1,214 @@
+@page "/agents/{Id:guid}"
+@inject HttpClient Http
+@using IISEntinel.Central.Services
+@inject IAgentService AgentService
+@rendermode InteractiveServer
+
+<PageTitle>Agent Detail</PageTitle>
+
+@if (_loading)
+{
+    <div class="panel-loading">Loading agent detail...</div>
+}
+else if (_agent is null)
+{
+    <div class="empty-state">Agent not found.</div>
+}
+else
+{
+    <div class="page-shell">
+        <div class="page-header">
+            <div>
+                <div class="eyebrow">IISEntinel Central</div>
+                <h1 class="page-title">@_agent.DisplayName</h1>
+                <p class="page-subtitle">@_agent.Hostname @if (!string.IsNullOrWhiteSpace(_agent.Fqdn)) { <span>• @_agent.Fqdn</span> }</p>
+            </div>
+            <div class="page-header-actions">
+                <a class="btn btn-ghost" href="/agents">Back</a>
+                <button class="btn btn-ghost" @onclick="LoadAsync">Refresh</button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value">@_agent.Status</div></div>
+            <div class="stat-card"><div class="stat-label">Connectivity</div><div class="stat-value">@(_isOnline ? "Online" : "Offline")</div></div>
+            <div class="stat-card"><div class="stat-label">App Pools</div><div class="stat-value">@_appPools.Count</div></div>
+            <div class="stat-card"><div class="stat-label">Sites</div><div class="stat-value">@_sites.Count</div></div>
+        </div>
+
+        <div class="dashboard-grid">
+            <section class="panel">
+                <div class="panel-header"><div><div class="panel-title">App Pools</div><div class="panel-subtitle">Start, stop and recycle remotely.</div></div></div>
+                <div class="table-wrap">
+                    <table class="table-modern">
+                        <thead><tr><th>Name</th><th>State</th><th>Actions</th></tr></thead>
+                        <tbody>
+                        @foreach (var pool in _appPools)
+                        {
+                            <tr>
+                                <td>@pool.Name</td>
+                                <td><span class="badge @(pool.State == "Started" ? "badge-success" : "badge-neutral")">@pool.State</span></td>
+                                <td>
+                                    <button class="btn btn-ghost" @onclick='() => QueueAsync("AppPoolStart", pool.Name)'>Start</button>
+                                    <button class="btn btn-ghost" @onclick='() => QueueAsync("AppPoolStop", pool.Name)'>Stop</button>
+                                    <button class="btn btn-primary" @onclick='() => QueueAsync("AppPoolRecycle", pool.Name)'>Recycle</button>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-header"><div><div class="panel-title">Sites</div><div class="panel-subtitle">Start and stop sites remotely.</div></div></div>
+                <div class="table-wrap">
+                    <table class="table-modern">
+                        <thead><tr><th>Name</th><th>State</th><th>Bindings</th><th>Actions</th></tr></thead>
+                        <tbody>
+                        @foreach (var site in _sites)
+                        {
+                            <tr>
+                                <td>@site.Name</td>
+                                <td><span class="badge @(site.State == "Started" ? "badge-success" : "badge-neutral")">@site.State</span></td>
+                                <td>@string.Join(", ", site.Bindings)</td>
+                                <td>
+                                    <button class="btn btn-ghost" @onclick='() => QueueAsync("SiteStart", site.Name)'>Start</button>
+                                    <button class="btn btn-ghost" @onclick='() => QueueAsync("SiteStop", site.Name)'>Stop</button>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel">
+            <div class="panel-header"><div><div class="panel-title">Recent actions</div><div class="panel-subtitle">Latest queued and executed operations.</div></div></div>
+            <div class="table-wrap">
+                <table class="table-modern">
+                    <thead><tr><th>Type</th><th>Target</th><th>Status</th><th>Created</th><th>Completed</th><th>Message</th></tr></thead>
+                    <tbody>
+                    @foreach (var action in _actions)
+                    {
+                        <tr>
+                            <td>@action.ActionType</td>
+                            <td>@action.TargetName</td>
+                            <td><span class="badge @(MapBadge(action.Status))">@action.Status</span></td>
+                            <td>@FormatDate(action.CreatedUtc)</td>
+                            <td>@FormatDate(action.CompletedUtc)</td>
+                            <td>@(action.ResultMessage ?? action.Error ?? "-")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private bool _loading = true;
+    private AgentVm? _agent;
+    private bool _isOnline;
+    private List<AppPoolVm> _appPools = new();
+    private List<SiteVm> _sites = new();
+    private List<ActionVm> _actions = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var inventory = await Http.GetFromJsonAsync<InventoryResponse>($"/api/agents/{Id}/inventory");
+        var actions = await Http.GetFromJsonAsync<List<ActionVm>>($"/api/agents/{Id}/actions");
+
+        _agent = inventory?.Agent;
+        _appPools = inventory?.AppPools ?? new();
+        _sites = inventory?.Sites?.Select(x => new SiteVm
+        {
+            Name = x.Name,
+            State = x.State,
+            Bindings = System.Text.Json.JsonSerializer.Deserialize<List<string>>(x.BindingsJson) ?? new List<string>()
+        }).ToList() ?? new();
+        _actions = actions ?? new();
+        _isOnline = _agent?.LastSeenUtc is not null && DateTime.UtcNow - _agent.LastSeenUtc.Value <= TimeSpan.FromSeconds(90);
+        _loading = false;
+    }
+
+    private async Task QueueAsync(string actionType, string targetName)
+    {
+        await AgentService.QueueActionAsync(Id, actionType, targetName);
+        await LoadAsync();
+    }
+
+    private static string MapBadge(string status) => status switch
+    {
+        "Succeeded" => "badge-success",
+        "Failed" => "badge-danger",
+        "Pending" => "badge-warning",
+        _ => "badge-neutral"
+    };
+
+    private static string FormatDate(DateTime? utc)
+        => utc.HasValue ? utc.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "-";
+
+    private sealed class InventoryResponse
+    {
+        public AgentVm? Agent { get; set; }
+        public List<AppPoolVm> AppPools { get; set; } = new();
+        public List<SiteInventoryVm> Sites { get; set; } = new();
+    }
+
+    private sealed class AgentVm
+    {
+        public Guid Id { get; set; }
+        public string DisplayName { get; set; } = "";
+        public string Hostname { get; set; } = "";
+        public string Fqdn { get; set; } = "";
+        public string AgentIdentifier { get; set; } = "";
+        public string Status { get; set; } = "";
+        public DateTime? LastSeenUtc { get; set; }
+        public string AgentVersion { get; set; } = "";
+    }
+
+    private sealed class AppPoolVm
+    {
+        public string Name { get; set; } = "";
+        public string State { get; set; } = "";
+        public DateTime UpdatedUtc { get; set; }
+    }
+
+    private sealed class SiteInventoryVm
+    {
+        public string Name { get; set; } = "";
+        public string State { get; set; } = "";
+        public string BindingsJson { get; set; } = "[]";
+        public DateTime UpdatedUtc { get; set; }
+    }
+
+    private sealed class SiteVm
+    {
+        public string Name { get; set; } = "";
+        public string State { get; set; } = "";
+        public List<string> Bindings { get; set; } = new();
+    }
+
+    private sealed class ActionVm
+    {
+        public Guid Id { get; set; }
+        public string ActionType { get; set; } = "";
+        public string TargetName { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? ResultMessage { get; set; }
+        public string? Error { get; set; }
+        public DateTime CreatedUtc { get; set; }
+        public DateTime? CompletedUtc { get; set; }
+    }
+}

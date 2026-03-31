@@ -9,7 +9,6 @@ public static class AgentActionEndpoints
 {
     public static void MapAgentActionEndpoints(this WebApplication app)
     {
-        // Crear acción desde la UI / Central
         app.MapPost("/api/agents/{id:guid}/actions", async (
             Guid id,
             CreateAgentActionRequest request,
@@ -52,7 +51,6 @@ public static class AgentActionEndpoints
             });
         });
 
-        // El agent pregunta si tiene trabajo
         app.MapGet("/api/agents/{agentIdentifier}/actions/next", async (
             string agentIdentifier,
             CentralDbContext db) =>
@@ -85,7 +83,6 @@ public static class AgentActionEndpoints
             });
         });
 
-        // El agent reporta OK
         app.MapPost("/api/agents/{agentIdentifier}/actions/{actionId:guid}/complete", async (
             string agentIdentifier,
             Guid actionId,
@@ -96,9 +93,7 @@ public static class AgentActionEndpoints
             if (agent is null)
                 return Results.NotFound(new { message = "Agent not found" });
 
-            var action = await db.AgentActions
-                .FirstOrDefaultAsync(x => x.Id == actionId && x.AgentId == agent.Id);
-
+            var action = await db.AgentActions.FirstOrDefaultAsync(x => x.Id == actionId && x.AgentId == agent.Id);
             if (action is null)
                 return Results.NotFound(new { message = "Action not found" });
 
@@ -106,12 +101,10 @@ public static class AgentActionEndpoints
             action.CompletedUtc = DateTime.UtcNow;
             action.ResultMessage = request.ResultMessage;
             action.Error = null;
-
             await db.SaveChangesAsync();
             return Results.Ok();
         });
 
-        // El agent reporta FAIL
         app.MapPost("/api/agents/{agentIdentifier}/actions/{actionId:guid}/fail", async (
             string agentIdentifier,
             Guid actionId,
@@ -122,22 +115,18 @@ public static class AgentActionEndpoints
             if (agent is null)
                 return Results.NotFound(new { message = "Agent not found" });
 
-            var action = await db.AgentActions
-                .FirstOrDefaultAsync(x => x.Id == actionId && x.AgentId == agent.Id);
-
+            var action = await db.AgentActions.FirstOrDefaultAsync(x => x.Id == actionId && x.AgentId == agent.Id);
             if (action is null)
                 return Results.NotFound(new { message = "Action not found" });
 
             action.Status = "Failed";
             action.CompletedUtc = DateTime.UtcNow;
-            action.Error = request.Error;
             action.ResultMessage = request.ResultMessage;
-
+            action.Error = request.Error;
             await db.SaveChangesAsync();
             return Results.Ok();
         });
 
-        // Histórico para UI
         app.MapGet("/api/agents/{id:guid}/actions", async (Guid id, CentralDbContext db) =>
         {
             var exists = await db.Agents.AnyAsync(x => x.Id == id);
@@ -147,7 +136,7 @@ public static class AgentActionEndpoints
             var actions = await db.AgentActions
                 .Where(x => x.AgentId == id)
                 .OrderByDescending(x => x.CreatedUtc)
-                .Take(50)
+                .Take(100)
                 .Select(x => new
                 {
                     x.Id,
