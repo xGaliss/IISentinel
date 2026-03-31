@@ -1,70 +1,94 @@
 ﻿@page "/sites"
+@rendermode InteractiveServer
 @using IISentinel.Panel.Models
 @inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>Sites</PageTitle>
 
-<h1>Sites</h1>
+<div class="page-shell">
+    <div class="page-hero">
+        <div>
+            <div class="page-kicker">Web</div>
+            <h1 class="page-title">Sites</h1>
+            <div class="page-subtitle">Consulta bindings, estado y acciones rápidas sobre los sitios configurados en IIS.</div>
+        </div>
+    </div>
 
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <div class="alert alert-danger">@ErrorMessage</div>
-}
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="alert alert-danger">@ErrorMessage</div>
+    }
 
-<div class="mb-3">
-    <button class="btn btn-primary" @onclick="LoadSitesAsync" disabled="@IsLoading">
-        @(IsLoading ? "Loading..." : "Refresh")
-    </button>
-</div>
+    <div class="surface-card">
+        <div class="toolbar-row">
+            <button class="btn btn-primary" @onclick="LoadSitesAsync" disabled="@IsLoading">
+                @(IsLoading ? "Loading..." : "Refresh")
+            </button>
+        </div>
 
-@if (SitesList.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <p>No sites found.</p>
-}
-else if (SitesList.Count > 0)
-{
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th>Bindings</th>
-                <th style="width: 220px;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var site in SitesList)
-            {
-                <tr>
-                    <td>@site.Name</td>
-                    <td>@site.State</td>
-                    <td>
-                        @if (site.Bindings?.Count > 0)
+        @if (SitesList.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="empty-state">No sites found.</div>
+        }
+        else if (SitesList.Count > 0)
+        {
+            <div class="iis-table-wrap">
+                <table class="iis-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>State</th>
+                            <th>Bindings</th>
+                            <th style="width:220px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var site in SitesList)
                         {
-                            <ul class="mb-0">
-                                @foreach (var binding in site.Bindings)
-                                {
-                                    <li>@binding</li>
-                                }
-                            </ul>
-                        }
-                    </td>
-                    <td>
-                        <button class="btn btn-success btn-sm me-2"
-                                @onclick="() => StartSiteAsync(site.Name)">
-                            Start
-                        </button>
+                            <tr>
+                                <td>
+                                    <div class="item-title">@site.Name</div>
+                                    <div class="item-meta">IIS website</div>
+                                </td>
+                                <td>
+                                    <span class="@GetStateCss(site.State)">@site.State</span>
+                                </td>
+                                <td>
+                                    @if (site.Bindings?.Count > 0)
+                                    {
+                                        <ul class="binding-list">
+                                            @foreach (var binding in site.Bindings)
+                                            {
+                                                <li>@binding</li>
+                                            }
+                                        </ul>
+                                    }
+                                    else
+                                    {
+                                        <span class="item-meta">No bindings</span>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="action-group">
+                                        <button class="btn-iis btn-iis-start"
+                                                @onclick="() => StartSiteAsync(site.Name)">
+                                            Start
+                                        </button>
 
-                        <button class="btn btn-warning btn-sm"
-                                @onclick="() => StopSiteAsync(site.Name)">
-                            Stop
-                        </button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+                                        <button class="btn-iis btn-iis-stop"
+                                                @onclick="() => StopSiteAsync(site.Name)">
+                                            Stop
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
 
 @code {
     private List<SiteDto> SitesList { get; set; } = new();
@@ -131,4 +155,12 @@ else if (SitesList.Count > 0)
             ErrorMessage = $"Action error: {ex.Message}";
         }
     }
+
+    private static string GetStateCss(string? state) =>
+        state?.ToLowerInvariant() switch
+        {
+            "started" => "state-pill state-started",
+            "stopped" => "state-pill state-stopped",
+            _ => "state-pill state-other"
+        };
 }

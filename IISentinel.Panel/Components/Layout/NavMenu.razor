@@ -1,45 +1,45 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">IISentinel.Panel</a>
+﻿@using Microsoft.AspNetCore.Components.Routing
+
+<div class="side-shell">
+    <div class="brand-block">
+        <div class="brand-mark"></div>
+        <div class="brand-copy">
+            <div class="brand-title">IISEntinel</div>
+            <div class="brand-subtitle">IIS control panel</div>
+        </div>
+    </div>
+
+    <div class="nav-section-title">MONITORING</div>
+
+    <nav class="nav-stack">
+        <NavLink class="nav-entry" href="" Match="NavLinkMatch.All">
+            <span class="nav-icon">◫</span>
+            <span class="nav-text">Dashboard</span>
+        </NavLink>
+
+        <NavLink class="nav-entry" href="apppools">
+            <span class="nav-icon">◎</span>
+            <span class="nav-text">App Pools</span>
+        </NavLink>
+
+        <NavLink class="nav-entry" href="sites">
+            <span class="nav-icon">▣</span>
+            <span class="nav-text">Sites</span>
+        </NavLink>
+
+        <NavLink class="nav-entry" href="logs">
+            <span class="nav-icon">≡</span>
+            <span class="nav-text">Logs</span>
+        </NavLink>
+    </nav>
+
+    <div class="nav-spacer"></div>
+
+    <div class="side-footer">
+        <div class="footer-label">AGENT STATUS</div>
+        <div class="status-pill">
+            <span class="status-dot"></span>
+            <span>Connected</span>
+        </div>
     </div>
 </div>
-
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="apppools">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> App Pools
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="sites">
-                Sites
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="logs">
-                Logs
-            </NavLink>
-        </div>
-    </nav>
-</div>
-

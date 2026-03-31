@@ -1,63 +1,83 @@
 ﻿@page "/apppools"
+@rendermode InteractiveServer
 @using IISentinel.Panel.Models
 @inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>App Pools</PageTitle>
 
-<h1>App Pools</h1>
+<div class="page-shell">
+    <div class="page-hero">
+        <div>
+            <div class="page-kicker">Monitoring</div>
+            <h1 class="page-title">App Pools</h1>
+            <div class="page-subtitle">Supervisa el estado y ejecuta acciones rápidas sobre los application pools.</div>
+        </div>
+    </div>
 
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <div class="alert alert-danger">@ErrorMessage</div>
-}
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="alert alert-danger">@ErrorMessage</div>
+    }
 
-<div class="mb-3">
-    <button class="btn btn-primary" @onclick="LoadAppPoolsAsync" disabled="@IsLoading">
-        @(IsLoading ? "Loading..." : "Refresh")
-    </button>
+    <div class="surface-card">
+        <div class="toolbar-row">
+            <button class="btn btn-primary" @onclick="LoadAppPoolsAsync" disabled="@IsLoading">
+                @(IsLoading ? "Loading..." : "Refresh")
+            </button>
+        </div>
+
+        @if (Pools.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="empty-state">No app pools found.</div>
+        }
+        else if (Pools.Count > 0)
+        {
+            <div class="iis-table-wrap">
+                <table class="iis-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>State</th>
+                            <th style="width:320px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var pool in Pools)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="item-title">@pool.Name</div>
+                                    <div class="item-meta">IIS application pool</div>
+                                </td>
+                                <td>
+                                    <span class="@GetStateCss(pool.State)">@pool.State</span>
+                                </td>
+                                <td>
+                                    <div class="action-group">
+                                        <button class="btn-iis btn-iis-start"
+                                                @onclick="() => StartPoolAsync(pool.Name)">
+                                            Start
+                                        </button>
+
+                                        <button class="btn-iis btn-iis-stop"
+                                                @onclick="() => StopPoolAsync(pool.Name)">
+                                            Stop
+                                        </button>
+
+                                        <button class="btn-iis btn-iis-recycle"
+                                                @onclick="() => RecyclePoolAsync(pool.Name)">
+                                            Recycle
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
 </div>
-
-@if (Pools.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <p>No app pools found.</p>
-}
-else if (Pools.Count > 0)
-{
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th style="width: 320px;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var pool in Pools)
-            {
-                <tr>
-                    <td>@pool.Name</td>
-                    <td>@pool.State</td>
-                    <td>
-                        <button class="btn btn-success btn-sm me-2"
-                                @onclick="() => StartPoolAsync(pool.Name)">
-                            Start
-                        </button>
-
-                        <button class="btn btn-warning btn-sm me-2"
-                                @onclick="() => StopPoolAsync(pool.Name)">
-                            Stop
-                        </button>
-
-                        <button class="btn btn-danger btn-sm"
-                                @onclick="() => RecyclePoolAsync(pool.Name)">
-                            Recycle
-                        </button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
 
 @code {
     private List<AppPoolDto> Pools { get; set; } = new();
@@ -129,4 +149,12 @@ else if (Pools.Count > 0)
             ErrorMessage = $"Action error: {ex.Message}";
         }
     }
+
+    private static string GetStateCss(string? state) =>
+        state?.ToLowerInvariant() switch
+        {
+            "started" => "state-pill state-started",
+            "stopped" => "state-pill state-stopped",
+            _ => "state-pill state-other"
+        };
 }

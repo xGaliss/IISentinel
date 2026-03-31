@@ -1,7 +1,228 @@
 ﻿@page "/"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using IISentinel.Panel.Models
+@inject IHttpClientFactory HttpClientFactory
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Dashboard</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="dashboard-shell">
+    <section class="hero-panel">
+        <div>
+            <p class="eyebrow">IISEntinel</p>
+            <h1>Control center</h1>
+            <p class="hero-copy">
+                Monitoriza App Pools, Sites y eventos recientes desde un único panel.
+            </p>
+        </div>
 
-Welcome to your new app.
+        <div class="hero-actions">
+            <button class="btn btn-primary sentinel-btn" @onclick="RefreshAsync" disabled="@IsLoading">
+                @(IsLoading ? "Actualizando..." : "Actualizar dashboard")
+            </button>
+            <a class="sentinel-link-btn" href="/apppools">Ver App Pools</a>
+            <a class="sentinel-link-btn" href="/sites">Ver Sites</a>
+            <a class="sentinel-link-btn" href="/logs">Ver Logs</a>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="sentinel-alert">
+            @ErrorMessage
+        </div>
+    }
+
+    <section class="stats-grid">
+        <article class="metric-card">
+            <p class="metric-label">App Pools</p>
+            <p class="metric-value">@Pools.Count</p>
+            <p class="metric-sub">@RunningPools en marcha · @StoppedPools detenidos</p>
+        </article>
+
+        <article class="metric-card">
+            <p class="metric-label">Sites</p>
+            <p class="metric-value">@Sites.Count</p>
+            <p class="metric-sub">@RunningSites activos · @StoppedSites detenidos</p>
+        </article>
+
+        <article class="metric-card">
+            <p class="metric-label">Agent</p>
+            <p class="metric-value status-@(AgentOnline ? "online" : "offline")">
+                @(AgentOnline ? "Online" : "Offline")
+            </p>
+            <p class="metric-sub">Conexión con el servidor IIS</p>
+        </article>
+
+        <article class="metric-card">
+            <p class="metric-label">Último log</p>
+            <p class="metric-value metric-value-small">@CurrentLogFile</p>
+            <p class="metric-sub">Últimas @RecentLogLines.Count líneas cargadas</p>
+        </article>
+    </section>
+
+    <section class="dashboard-grid">
+        <article class="sentinel-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="panel-kicker">Estado</p>
+                    <h2>App Pools</h2>
+                </div>
+                <a href="/apppools">Abrir</a>
+            </div>
+
+            @if (Pools.Count == 0)
+            {
+                <p class="empty-copy">No se han encontrado App Pools.</p>
+            }
+            else
+            {
+                <div class="status-list">
+                    @foreach (var pool in Pools.Take(6))
+                    {
+                        <div class="status-row">
+                            <div>
+                                <p class="status-name">@pool.Name</p>
+                                <p class="status-meta">Estado actual del pool</p>
+                            </div>
+                            <span class="status-pill @(GetStateCss(pool.State))">@pool.State</span>
+                        </div>
+                    }
+                </div>
+            }
+        </article>
+
+        <article class="sentinel-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="panel-kicker">Web</p>
+                    <h2>Sites</h2>
+                </div>
+                <a href="/sites">Abrir</a>
+            </div>
+
+            @if (Sites.Count == 0)
+            {
+                <p class="empty-copy">No se han encontrado Sites.</p>
+            }
+            else
+            {
+                <div class="status-list">
+                    @foreach (var site in Sites.Take(6))
+                    {
+                        <div class="status-row status-row-block">
+                            <div>
+                                <p class="status-name">@site.Name</p>
+                                <p class="status-meta">@(site.Bindings?.FirstOrDefault() ?? "Sin binding")</p>
+                            </div>
+                            <span class="status-pill @(GetStateCss(site.State))">@site.State</span>
+                        </div>
+                    }
+                </div>
+            }
+        </article>
+    </section>
+
+    <section class="dashboard-grid logs-grid">
+        <article class="sentinel-panel full-width">
+            <div class="panel-head">
+                <div>
+                    <p class="panel-kicker">Actividad</p>
+                    <h2>Eventos recientes</h2>
+                </div>
+                <a href="/logs">Abrir logs</a>
+            </div>
+
+            @if (RecentLogLines.Count == 0)
+            {
+                <p class="empty-copy">No hay líneas de log para mostrar.</p>
+            }
+            else
+            {
+                <div class="dashboard-log-console">
+                    @foreach (var line in RecentLogLines.TakeLast(16))
+                    {
+                        <div class="@GetLogCss(line)">@line</div>
+                    }
+                </div>
+            }
+        </article>
+    </section>
+</div>
+
+@code {
+    private List<AppPoolDto> Pools { get; set; } = new();
+    private List<SiteDto> Sites { get; set; } = new();
+    private List<string> RecentLogLines { get; set; } = new();
+    private bool AgentOnline { get; set; }
+    private bool IsLoading { get; set; }
+    private string? ErrorMessage { get; set; }
+    private string CurrentLogFile { get; set; } = "Sin datos";
+
+    private int RunningPools => Pools.Count(x => string.Equals(x.State, "Started", StringComparison.OrdinalIgnoreCase));
+    private int StoppedPools => Pools.Count - RunningPools;
+    private int RunningSites => Sites.Count(x => string.Equals(x.State, "Started", StringComparison.OrdinalIgnoreCase));
+    private int StoppedSites => Sites.Count - RunningSites;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+
+            var client = HttpClientFactory.CreateClient("Agent");
+
+            var poolsTask = client.GetFromJsonAsync<List<AppPoolDto>>("/apppools");
+            var sitesTask = client.GetFromJsonAsync<List<SiteDto>>("/sites");
+            var logsTask = client.GetFromJsonAsync<LogsResponseDto>("/logs/recent?lines=50");
+
+            await Task.WhenAll(poolsTask!, sitesTask!, logsTask!);
+
+            Pools = poolsTask.Result ?? new();
+            Sites = sitesTask.Result ?? new();
+
+            var logs = logsTask.Result;
+            RecentLogLines = logs?.Lines ?? new();
+            CurrentLogFile = logs?.File ?? "Sin datos";
+
+            AgentOnline = true;
+        }
+        catch (Exception ex)
+        {
+            AgentOnline = false;
+            ErrorMessage = $"No se ha podido cargar el dashboard: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private static string GetStateCss(string? state)
+    {
+        if (string.Equals(state, "Started", StringComparison.OrdinalIgnoreCase))
+            return "state-ok";
+
+        if (string.Equals(state, "Stopped", StringComparison.OrdinalIgnoreCase))
+            return "state-bad";
+
+        return "state-warn";
+    }
+
+    private static string GetLogCss(string line)
+    {
+        if (line.Contains("[ERR]") || line.Contains("Error", StringComparison.OrdinalIgnoreCase))
+            return "dashboard-log-line dashboard-log-error";
+
+        if (line.Contains("[WRN]") || line.Contains("Warning", StringComparison.OrdinalIgnoreCase))
+            return "dashboard-log-line dashboard-log-warning";
+
+        return "dashboard-log-line dashboard-log-info";
+    }
+}
