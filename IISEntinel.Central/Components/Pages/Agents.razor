@@ -1,17 +1,24 @@
-﻿@page "/"
+﻿@page "/agents"
+@implements IDisposable
 @using IISEntinel.Central.Models
 @using IISEntinel.Central.Services
 @inject IAgentService AgentService
 @rendermode InteractiveServer
 
-<PageTitle>Dashboard</PageTitle>
+<PageTitle>Agents</PageTitle>
 
 <div class="page-shell">
     <div class="page-header">
         <div>
             <div class="eyebrow">IISEntinel Central</div>
-            <h1 class="page-title">Dashboard</h1>
-            <p class="page-subtitle">Overview of enrolled agents and platform readiness.</p>
+            <h1 class="page-title">Agents</h1>
+            <p class="page-subtitle">Manage enrolled agents and monitor their connectivity in real time.</p>
+        </div>
+
+        <div class="page-header-actions">
+            <button class="btn btn-ghost" @onclick="RefreshAsync" disabled="@_loading">
+                @(_loading ? "Refreshing..." : "Refresh")
+            </button>
         </div>
     </div>
 
@@ -19,19 +26,19 @@
         <div class="stat-card">
             <div class="stat-label">Total Agents</div>
             <div class="stat-value">@_agents.Count</div>
-            <div class="stat-meta">Known by Central</div>
+            <div class="stat-meta">Registered in Central</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-label">Online</div>
             <div class="stat-value">@_agents.Count(IsOnline)</div>
-            <div class="stat-meta">Heartbeat within 90 seconds</div>
+            <div class="stat-meta">Heartbeat received recently</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-label">Pending Approval</div>
             <div class="stat-value">@_agents.Count(x => x.Status == "Pending")</div>
-            <div class="stat-meta">Needs operator action</div>
+            <div class="stat-meta">Agents waiting for action</div>
         </div>
 
         <div class="stat-card">
@@ -41,101 +48,26 @@
         </div>
     </div>
 
-    <div class="dashboard-grid">
-        <section class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">Quick actions</div>
-                    <div class="panel-subtitle">Jump into the most useful areas.</div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="quick-actions">
-                    <a class="quick-action-card" href="/agents">
-                        <div class="quick-action-title">Open Agents</div>
-                        <div class="quick-action-subtitle">Review enrollment, connectivity and approvals.</div>
-                    </a>
-
-                    <div class="quick-action-card quick-action-card-muted">
-                        <div class="quick-action-title">Sites</div>
-                        <div class="quick-action-subtitle">Coming soon: IIS sites status and actions.</div>
-                    </div>
-
-                    <div class="quick-action-card quick-action-card-muted">
-                        <div class="quick-action-title">App Pools</div>
-                        <div class="quick-action-subtitle">Coming soon: start, stop and recycle pools.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">Platform status</div>
-                    <div class="panel-subtitle">Current Central capabilities.</div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="status-list">
-                    <div class="status-item">
-                        <span class="badge badge-success">Ready</span>
-                        <div>
-                            <div class="status-item-title">Enrollment</div>
-                            <div class="status-item-subtitle">Agents can register in Central.</div>
-                        </div>
-                    </div>
-
-                    <div class="status-item">
-                        <span class="badge badge-success">Ready</span>
-                        <div>
-                            <div class="status-item-title">Approval flow</div>
-                            <div class="status-item-subtitle">Pending agents can be approved from the UI.</div>
-                        </div>
-                    </div>
-
-                    <div class="status-item">
-                        <span class="badge badge-success">Ready</span>
-                        <div>
-                            <div class="status-item-title">Heartbeat</div>
-                            <div class="status-item-subtitle">Connectivity and last seen are tracked.</div>
-                        </div>
-                    </div>
-
-                    <div class="status-item">
-                        <span class="badge badge-warning">Next</span>
-                        <div>
-                            <div class="status-item-title">Remote IIS actions</div>
-                            <div class="status-item-subtitle">Start with app pool recycle and site status.</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </div>
-
     <div class="panel">
         <div class="panel-header">
             <div>
-                <div class="panel-title">Recent agents</div>
-                <div class="panel-subtitle">Latest known agents in Central.</div>
+                <div class="panel-title">Registered agents</div>
+                <div class="panel-subtitle">Enrollment status, connectivity and last seen information.</div>
             </div>
         </div>
 
         @if (_loading)
         {
             <div class="panel-loading">
-                <div class="loading-title">Loading dashboard...</div>
-                <div class="loading-subtitle">Fetching latest agent information.</div>
+                <div class="loading-title">Loading agents...</div>
+                <div class="loading-subtitle">Fetching latest state from Central database.</div>
             </div>
         }
         else if (_agents.Count == 0)
         {
             <div class="empty-state">
-                <div class="empty-state-title">No agents yet</div>
-                <div class="empty-state-subtitle">Once an agent enrolls, it will appear here.</div>
+                <div class="empty-state-title">No agents registered yet</div>
+                <div class="empty-state-subtitle">Approved or pending agents will appear here once they enroll.</div>
             </div>
         }
         else
@@ -145,30 +77,41 @@
                     <thead>
                         <tr>
                             <th>Agent</th>
+                            <th>Version</th>
                             <th>Approval</th>
                             <th>Connectivity</th>
                             <th>Last seen</th>
                             <th>Created</th>
+                            <th class="actions-col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var agent in _agents.Take(5))
+                        @foreach (var agent in _agents)
                         {
                             <tr>
                                 <td>
                                     <div class="agent-cell">
-                                        <div class="agent-name">@agent.DisplayName</div>
+                                        <div class="agent-name-row">
+                                            <span class="agent-name">@(string.IsNullOrWhiteSpace(agent.DisplayName) ? "Unnamed agent" : agent.DisplayName)</span>
+                                        </div>
+
                                         <div class="agent-meta">
-                                            <span>@agent.Hostname</span>
+                                            <span>@(string.IsNullOrWhiteSpace(agent.Hostname) ? "-" : agent.Hostname)</span>
                                             @if (!string.IsNullOrWhiteSpace(agent.Fqdn))
                                             {
                                                 <span class="agent-meta-separator">•</span>
                                                 <span>@agent.Fqdn</span>
                                             }
                                         </div>
+
                                         <div class="agent-id">@agent.AgentIdentifier</div>
                                     </div>
                                 </td>
+
+                                <td>
+                                    <span class="mono-chip">@(string.IsNullOrWhiteSpace(agent.AgentVersion) ? "-" : agent.AgentVersion)</span>
+                                </td>
+
                                 <td>
                                     @switch (agent.Status)
                                     {
@@ -183,6 +126,7 @@
                                             break;
                                     }
                                 </td>
+
                                 <td>
                                     @if (agent.LastSeenUtc is null)
                                     {
@@ -197,8 +141,31 @@
                                         <span class="badge badge-neutral">Offline</span>
                                     }
                                 </td>
-                                <td>@FormatDate(agent.LastSeenUtc)</td>
-                                <td>@FormatDate(agent.CreatedUtc)</td>
+
+                                <td>
+                                    <div class="date-cell">@FormatDate(agent.LastSeenUtc)</div>
+                                </td>
+
+                                <td>
+                                    <div class="date-cell">@FormatDate(agent.CreatedUtc)</div>
+                                </td>
+
+                                <td class="actions-col">
+                                    @if (agent.Status == "Pending")
+                                    {
+                                        <button class="btn btn-primary"
+                                                @onclick="() => ApproveAsync(agent.Id)"
+                                                disabled="@_busyIds.Contains(agent.Id)">
+                                            @(_busyIds.Contains(agent.Id) ? "Approving..." : "Approve")
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-ghost btn-disabled" disabled>
+                                            No action
+                                        </button>
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -211,9 +178,48 @@
 @code {
     private List<Agent> _agents = new();
     private bool _loading = true;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _cts;
+    private HashSet<Guid> _busyIds = new();
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadAsync();
+
+        _cts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+
+        _ = RunRefreshLoopAsync(_cts.Token);
+    }
+
+    private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
         _agents = await AgentService.GetAgentsAsync();
         _loading = false;
     }
@@ -223,7 +229,8 @@
         if (agent.LastSeenUtc is null)
             return false;
 
-        return DateTime.UtcNow - agent.LastSeenUtc.Value <= TimeSpan.FromSeconds(90);
+        var diff = DateTime.UtcNow - agent.LastSeenUtc.Value;
+        return diff <= TimeSpan.FromSeconds(90);
     }
 
     private static string FormatDate(DateTime utc)
@@ -233,4 +240,29 @@
         => utc.HasValue
             ? utc.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")
             : "-";
+
+    private async Task ApproveAsync(Guid agentId)
+    {
+        if (_busyIds.Contains(agentId))
+            return;
+
+        _busyIds.Add(agentId);
+
+        try
+        {
+            await AgentService.ApproveAgentAsync(agentId);
+            await LoadAsync();
+        }
+        finally
+        {
+            _busyIds.Remove(agentId);
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _timer?.Dispose();
+        _cts?.Dispose();
+    }
 }

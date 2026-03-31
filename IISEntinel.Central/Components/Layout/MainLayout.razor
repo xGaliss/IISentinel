@@ -1,9 +1,32 @@
 ﻿@inherits LayoutComponentBase
+@rendermode InteractiveServer
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">II</div>
+            <div>
+                <div class="brand-title">IISEntinel</div>
+                <div class="brand-subtitle">Central</div>
+            </div>
+        </div>
 
-@Body
+        <NavMenu />
+    </aside>
 
-<div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="" class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
+    <div class="app-main">
+        <header class="topbar">
+            <div>
+                <div class="topbar-title">Operations Console</div>
+                <div class="topbar-subtitle">Monitor agents, IIS health and remote actions.</div>
+            </div>
+
+            <div class="topbar-right">
+                <span class="topbar-pill">Preview</span>
+            </div>
+        </header>
+
+        <main class="content">
+            @Body
+        </main>
+    </div>
 </div>

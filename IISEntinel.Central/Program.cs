@@ -1,5 +1,6 @@
 using IISEntinel.Central.Data;
 using IISEntinel.Central.Endpoints;
+using IISEntinel.Central.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,7 +9,7 @@ builder.WebHost.UseUrls("https://0.0.0.0:7016", "http://0.0.0.0:5008");
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
-
+builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddServerSideBlazor()
     .AddCircuitOptions(options =>
     {
@@ -31,6 +32,31 @@ app.MapRazorComponents<IISEntinel.Central.Components.App>()
 
 app.MapAgentEndpoints();
 app.MapAgentManagementEndpoints();
+
+app.MapPost("/api/agents/{id:guid}/approve", async (Guid id, CentralDbContext db) =>
+{
+    var agent = await db.Agents.FirstOrDefaultAsync(x => x.Id == id);
+    if (agent is null)
+        return Results.NotFound();
+
+    if (agent.Status != "Approved")
+    {
+        agent.Status = "Approved";
+        agent.ApprovedUtc = DateTime.UtcNow;
+        agent.RevokedUtc = null;
+
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Ok(new
+    {
+        agent.Id,
+        agent.AgentIdentifier,
+        agent.Status,
+        agent.ApprovedUtc
+    });
+});
+
 
 using (var scope = app.Services.CreateScope())
 {

@@ -1,0 +1,32 @@
+﻿@using Microsoft.AspNetCore.Components.Routing
+@rendermode InteractiveServer
+
+<nav class="nav-section">
+    <NavLink href="/" Match="NavLinkMatch.All" class="nav-link">
+        <span class="nav-link-text">Dashboard</span>
+    </NavLink>
+
+    <NavLink href="/agents" class="nav-link">
+        <span class="nav-link-text">Agents</span>
+    </NavLink>
+
+    <a class="nav-link nav-link-disabled" href="javascript:void(0)">
+        <span class="nav-link-text">Sites</span>
+        <span class="nav-coming-soon">Soon</span>
+    </a>
+
+    <a class="nav-link nav-link-disabled" href="javascript:void(0)">
+        <span class="nav-link-text">App Pools</span>
+        <span class="nav-coming-soon">Soon</span>
+    </a>
+
+    <a class="nav-link nav-link-disabled" href="javascript:void(0)">
+        <span class="nav-link-text">Alerts</span>
+        <span class="nav-coming-soon">Soon</span>
+    </a>
+
+    <a class="nav-link nav-link-disabled" href="javascript:void(0)">
+        <span class="nav-link-text">Settings</span>
+        <span class="nav-coming-soon">Soon</span>
+    </a>
+</nav>
