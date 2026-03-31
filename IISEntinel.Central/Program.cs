@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.UseUrls("https://0.0.0.0:7016", "http://0.0.0.0:5008");
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -18,8 +20,6 @@ builder.Services.AddDbContext<CentralDbContext>(options =>
 
 var app = builder.Build();
 
-builder.WebHost.UseUrls("https://0.0.0.0:7016", "http://0.0.0.0:5008");
-
 app.UseDeveloperExceptionPage();
 
 app.UseHttpsRedirection();
@@ -30,7 +30,7 @@ app.MapRazorComponents<IISEntinel.Central.Components.App>()
     .AddInteractiveServerRenderMode();
 
 app.MapAgentEndpoints();
-
+app.MapAgentManagementEndpoints();
 
 using (var scope = app.Services.CreateScope())
 {

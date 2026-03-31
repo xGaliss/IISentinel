@@ -2,9 +2,9 @@ using Microsoft.Extensions.Options;
 using Microsoft.Web.Administration;
 using Serilog;
 using System.Collections.Concurrent;
-using IISEntinel.Agent;
 using System.Net.Http.Json;
 using System.Text.Json;
+using IISEntinel.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +40,7 @@ builder.Host.UseSerilog();
 // =========================
 builder.Services.Configure<AutoHealOptions>(
     builder.Configuration.GetSection("AutoHeal"));
+
 builder.Services.Configure<CentralOptions>(
     builder.Configuration.GetSection("Central"));
 
@@ -480,6 +481,7 @@ else
 {
     Log.Information("Auto-heal disabled.");
 }
+
 try
 {
     await TryEnrollWithCentralAsync(centralOptions);
@@ -488,6 +490,9 @@ catch (Exception ex)
 {
     Log.Warning(ex, "Central enrollment attempt failed during startup.");
 }
+
+await StartHeartbeatLoopAsync(centralOptions);
+
 try
 {
     Log.Information("Starting IISEntinel Agent");
@@ -501,7 +506,6 @@ finally
 {
     Log.CloseAndFlush();
 }
-
 
 static async Task TryEnrollWithCentralAsync(CentralOptions centralOptions)
 {
@@ -533,33 +537,108 @@ static async Task TryEnrollWithCentralAsync(CentralOptions centralOptions)
 
     using var client = new HttpClient(handler)
     {
-        BaseAddress = new Uri(centralOptions.BaseUrl)
+        BaseAddress = new Uri(centralOptions.BaseUrl),
+        Timeout = TimeSpan.FromSeconds(15)
     };
 
     Log.Information("Attempting enrollment with Central. BaseUrl={BaseUrl} AgentIdentifier={AgentIdentifier}",
         centralOptions.BaseUrl, identity.AgentIdentifier);
 
-    var response = await client.PostAsJsonAsync("/api/agents/enroll", request);
+    try
+    {
+        var response = await client.PostAsJsonAsync("/api/agents/enroll", request);
 
+        var responseText = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Log.Warning("Central enrollment failed. StatusCode={StatusCode} Response={Response}",
+                (int)response.StatusCode, responseText);
+            return;
+        }
+
+        var enrollResponse = JsonSerializer.Deserialize<AgentEnrollResponse>(responseText);
+
+        if (enrollResponse == null)
+        {
+            Log.Warning("Central enrollment returned empty or invalid JSON. Response={Response}", responseText);
+            return;
+        }
+
+        Log.Information("Central enrollment successful. AgentId={AgentId} Status={Status}",
+            enrollResponse.AgentId, enrollResponse.Status);
+    }
+    catch (TaskCanceledException ex)
+    {
+        Log.Warning(ex, "Central enrollment timed out. BaseUrl={BaseUrl}", centralOptions.BaseUrl);
+    }
+    catch (HttpRequestException ex)
+    {
+        Log.Warning(ex, "Central enrollment HTTP error. BaseUrl={BaseUrl}", centralOptions.BaseUrl);
+    }
+}
+
+static Task StartHeartbeatLoopAsync(CentralOptions centralOptions)
+{
+    _ = Task.Run(async () =>
+    {
+        while (true)
+        {
+            try
+            {
+                await SendHeartbeatAsync(centralOptions);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Heartbeat loop iteration failed.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(30));
+        }
+    });
+
+    return Task.CompletedTask;
+}
+
+static async Task SendHeartbeatAsync(CentralOptions centralOptions)
+{
+    if (string.IsNullOrWhiteSpace(centralOptions.BaseUrl))
+    {
+        Log.Warning("Heartbeat skipped: Central:BaseUrl is missing.");
+        return;
+    }
+
+    var identity = await LoadOrCreateIdentityAsync();
+
+    using var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
+    using var client = new HttpClient(handler)
+    {
+        BaseAddress = new Uri(centralOptions.BaseUrl),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+    var request = new AgentHeartbeatRequest
+    {
+        AgentIdentifier = identity.AgentIdentifier,
+        AgentVersion = "0.1.0"
+    };
+
+    var response = await client.PostAsJsonAsync("/api/agents/heartbeat", request);
     var responseText = await response.Content.ReadAsStringAsync();
 
     if (!response.IsSuccessStatusCode)
     {
-        Log.Warning("Central enrollment failed. StatusCode={StatusCode} Response={Response}",
+        Log.Warning("Heartbeat rejected. StatusCode={StatusCode} Response={Response}",
             (int)response.StatusCode, responseText);
         return;
     }
 
-    var enrollResponse = await response.Content.ReadFromJsonAsync<AgentEnrollResponse>();
-
-    if (enrollResponse == null)
-    {
-        Log.Warning("Central enrollment returned empty or invalid JSON. Response={Response}", responseText);
-        return;
-    }
-
-    Log.Information("Central enrollment successful. AgentId={AgentId} Status={Status}",
-        enrollResponse.AgentId, enrollResponse.Status);
+    Log.Information("Heartbeat sent successfully. AgentIdentifier={AgentIdentifier}",
+        identity.AgentIdentifier);
 }
 
 static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
@@ -577,7 +656,7 @@ static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
         try
         {
             var json = await File.ReadAllTextAsync(identityPath);
-            var existing = System.Text.Json.JsonSerializer.Deserialize<AgentIdentity>(json);
+            var existing = JsonSerializer.Deserialize<AgentIdentity>(json);
 
             if (existing != null && !string.IsNullOrWhiteSpace(existing.AgentIdentifier))
             {
@@ -596,7 +675,7 @@ static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
         CreatedUtc = DateTime.UtcNow
     };
 
-    var newJson = System.Text.Json.JsonSerializer.Serialize(identity, new System.Text.Json.JsonSerializerOptions
+    var newJson = JsonSerializer.Serialize(identity, new JsonSerializerOptions
     {
         WriteIndented = true
     });
