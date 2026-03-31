@@ -18,6 +18,8 @@ builder.Services.AddDbContext<CentralDbContext>(options =>
 
 var app = builder.Build();
 
+builder.WebHost.UseUrls("https://0.0.0.0:7016", "http://0.0.0.0:5008");
+
 app.UseDeveloperExceptionPage();
 
 app.UseHttpsRedirection();
