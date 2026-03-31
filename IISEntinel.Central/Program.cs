@@ -13,6 +13,15 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddScoped<IAgentService, AgentService>();
 
+builder.Services.AddScoped(sp =>
+{
+    var navigation = sp.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+    return new HttpClient
+    {
+        BaseAddress = new Uri(navigation.BaseUri)
+    };
+});
+
 builder.Services.AddServerSideBlazor()
     .AddCircuitOptions(options =>
     {

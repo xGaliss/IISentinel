@@ -15,15 +15,29 @@
             <p class="page-subtitle">Manage enrolled agents, connectivity and quick access to IIS inventory.</p>
         </div>
         <div class="page-header-actions">
-            <button class="btn btn-ghost" @onclick="RefreshAsync" disabled="@_loading">@(_loading ? "Refreshing..." : "Refresh")</button>
+            <button class="btn btn-ghost" @onclick="RefreshAsync" disabled="@_loading">
+                @(_loading ? "Refreshing..." : "Refresh")
+            </button>
         </div>
     </div>
 
     <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">@_agents.Count</div></div>
-        <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value">@_agents.Count(IsOnline)</div></div>
-        <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value">@_agents.Count(x => x.Status == "Pending")</div></div>
-        <div class="stat-card"><div class="stat-label">Approved</div><div class="stat-value">@_agents.Count(x => x.Status == "Approved")</div></div>
+        <div class="stat-card">
+            <div class="stat-label">Total Agents</div>
+            <div class="stat-value">@_agents.Count</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Online</div>
+            <div class="stat-value">@_agents.Count(IsOnline)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Pending</div>
+            <div class="stat-value">@_agents.Count(x => x.Status == "Pending")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Approved</div>
+            <div class="stat-value">@_agents.Count(x => x.Status == "Approved")</div>
+        </div>
     </div>
 
     <div class="panel">
@@ -62,47 +76,66 @@
                             <tr>
                                 <td>
                                     <div class="agent-name">@agent.DisplayName</div>
-                                    <div class="agent-meta">@agent.Hostname @if (!string.IsNullOrWhiteSpace(agent.Fqdn)) {
-                                    <span>• @agent.Fqdn</span>
-                                }
-    </div>
-                                <div class="agent-id">DbId: @agent.Id</div>
-                            </td>
-                            <td>@agent.AgentVersion</td>
-                            <td>
-                                @if (agent.Status == "Approved")
-                                {
-                                    <span class="badge badge-success">Approved</span>
-                                }
-                                else
-                                {
-                                    <span class="badge badge-warning">@agent.Status</span>
-                                }
-                            </td>
-                            <td>
-                                @if (agent.LastSeenUtc is null)
-                                {
-                                    <span class="badge badge-neutral">Never seen</span>
-                                }
-                                else if (IsOnline(agent))
-                                {
-                                    <span class="badge badge-success">Online</span>
-                                }
-                                else
-                                {
-                                    <span class="badge badge-neutral">Offline</span>
-                                }
-                            </td>
-                            <td>@FormatDate(agent.LastSeenUtc)</td>
-                            <td>
-                                <a class="btn btn-primary" href="/agents/@agent.Id">Open</a>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-                }
+                                    <div class="agent-meta">
+                                        @agent.Hostname
+                                        @if (!string.IsNullOrWhiteSpace(agent.Fqdn))
+                                        {
+                                            <span>• @agent.Fqdn</span>
+                                        }
+                                    </div>
+                                    <div class="agent-id">DbId: @agent.Id</div>
+                                </td>
+
+                                <td>@agent.AgentVersion</td>
+
+                                <td>
+                                    @if (agent.Status == "Approved")
+                                    {
+                                        <span class="badge badge-success">Approved</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-warning">@agent.Status</span>
+                                    }
+                                </td>
+
+                                <td>
+                                    @if (agent.LastSeenUtc is null)
+                                    {
+                                        <span class="badge badge-neutral">Never seen</span>
+                                    }
+                                    else if (IsOnline(agent))
+                                    {
+                                        <span class="badge badge-success">Online</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-neutral">Offline</span>
+                                    }
+                                </td>
+
+                                <td>@FormatDate(agent.LastSeenUtc)</td>
+
+                                <td class="actions-col">
+                                    <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+                                        @if (agent.Status == "Pending")
+                                        {
+                                            <button class="btn btn-ghost"
+                                                    @onclick="() => ApproveAsync(agent.Id)"
+                                                    disabled="@_busyIds.Contains(agent.Id)">
+                                                @(_busyIds.Contains(agent.Id) ? "Approving..." : "Approve")
+                                            </button>
+                                        }
+
+                                        <a class="btn btn-primary" href="/agents/@agent.Id">Open</a>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     </div>
 </div>
 
@@ -111,6 +144,7 @@
     private bool _loading = true;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _cts;
+    private HashSet<Guid> _busyIds = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -133,7 +167,9 @@
                 });
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private async Task RefreshAsync() => await LoadAsync();
@@ -146,8 +182,27 @@
         _loading = false;
     }
 
+    private async Task ApproveAsync(Guid agentId)
+    {
+        if (_busyIds.Contains(agentId))
+            return;
+
+        _busyIds.Add(agentId);
+
+        try
+        {
+            await AgentService.ApproveAgentAsync(agentId);
+            await LoadAsync();
+        }
+        finally
+        {
+            _busyIds.Remove(agentId);
+        }
+    }
+
     private bool IsOnline(Agent agent)
-        => agent.LastSeenUtc is not null && DateTime.UtcNow - agent.LastSeenUtc.Value <= TimeSpan.FromSeconds(90);
+        => agent.LastSeenUtc is not null &&
+           DateTime.UtcNow - agent.LastSeenUtc.Value <= TimeSpan.FromSeconds(90);
 
     private static string FormatDate(DateTime? utc)
         => utc.HasValue ? utc.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "-";
