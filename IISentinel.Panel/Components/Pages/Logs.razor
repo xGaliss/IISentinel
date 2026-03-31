@@ -4,96 +4,78 @@
 @inject IHttpClientFactory HttpClientFactory
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
-
+@inject IJSRuntime JS
 
 <PageTitle>Logs</PageTitle>
 
-<h1>Logs</h1>
+<div class="logs-page">
 
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <div class="alert alert-danger">@ErrorMessage</div>
-}
+    <!-- TOP BAR -->
+    <div class="logs-toolbar">
 
-<div class="mb-3 d-flex gap-2 flex-wrap align-items-center">
-    <button class="btn btn-primary" @onclick="LoadLogsAsync" disabled="@IsLoading">
-        @(IsLoading ? "Loading..." : "Refresh")
-    </button>
+        <button class="btn-iis btn-iis-start" @onclick="LoadLogsAsync">
+            Refresh
+        </button>
 
-    <button class="btn btn-secondary" @onclick="ToggleAutoRefresh">
-        @(AutoRefreshEnabled ? "Stop auto-refresh" : "Start auto-refresh")
-    </button>
+        <button class="btn-iis btn-iis-stop" @onclick="ToggleAutoRefresh">
+            @(AutoRefreshEnabled ? "Auto ON" : "Auto OFF")
+        </button>
 
-    <select class="form-select log-select" @bind="SelectedLineCount">
-        <option value="50">50 lines</option>
-        <option value="100">100 lines</option>
-        <option value="300">300 lines</option>
-        <option value="1000">1000 lines</option>
-    </select>
+        <select class="dark-select" @bind="SelectedLineCount">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="300">300</option>
+            <option value="1000">1000</option>
+        </select>
 
-    <select class="form-select log-select" @bind="SelectedFile">
-        @foreach (var file in AvailableFiles)
-        {
-            <option value="@file">@file</option>
-        }
-    </select>
+        <select class="dark-select" @bind="SelectedFile">
+            @foreach (var file in AvailableFiles)
+            {
+                <option value="@file">@file</option>
+            }
+        </select>
 
-    <button class="btn btn-outline-primary" @onclick="DownloadCurrentLog">
-        Download
-    </button>
+        <button class="btn-iis" @onclick="DownloadCurrentLog">
+            Download
+        </button>
 
-    <input class="form-control log-filter"
-           placeholder="Filter text..."
-           @bind="FilterText"
-           @bind:event="oninput" />
-</div>
+        <input class="dark-input"
+               placeholder="Filter..."
+               @bind="FilterText"
+               @bind:event="oninput" />
 
-@if (!string.IsNullOrWhiteSpace(CurrentFile))
-{
-    <p><strong>Current file:</strong> @CurrentFile</p>
-}
+    </div>
 
-@if (!string.IsNullOrWhiteSpace(CurrentLogsDir))
-{
-    <p><strong>Logs path:</strong> @CurrentLogsDir</p>
-}
-
-@if (FilteredLogLines.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <p>No log lines found.</p>
-}
-else if (FilteredLogLines.Count > 0)
-{
-    <div class="log-console">
+    <!-- LOG CONSOLE -->
+    <div class="logs-console" id="logsConsole">
         @foreach (var line in FilteredLogLines)
         {
-            <div class="@GetLogCssClass(line)">@line</div>
+            <div class="@GetLogCssClass(line)">
+                @line
+            </div>
         }
     </div>
-}
+
+</div>
 
 @code {
-    private List<string> LogLines { get; set; } = new();
-    private List<string> AvailableFiles { get; set; } = new();
-    private string? CurrentFile { get; set; }
-    private string? CurrentLogsDir { get; set; }
-    private string? ErrorMessage { get; set; }
-    private bool IsLoading { get; set; }
-    private string FilterText { get; set; } = string.Empty;
+    private List<string> LogLines = new();
+    private List<string> AvailableFiles = new();
+    private bool _pendingScroll;
 
-    private int SelectedLineCount { get; set; } = 100;
-    private string? SelectedFile { get; set; }
+    private string? SelectedFile;
+    private string FilterText = "";
 
-    private bool AutoRefreshEnabled { get; set; }
+    private int SelectedLineCount = 100;
+
+    private bool AutoRefreshEnabled;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _cts;
 
     private List<string> FilteredLogLines =>
         string.IsNullOrWhiteSpace(FilterText)
             ? LogLines
-            : LogLines
-                .Where(l => l.Contains(FilterText, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            : LogLines.Where(l => l.Contains(FilterText, StringComparison.OrdinalIgnoreCase)).ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -102,51 +84,34 @@ else if (FilteredLogLines.Count > 0)
 
     private async Task LoadLogsAsync()
     {
-        try
+        var client = HttpClientFactory.CreateClient("Agent");
+
+        var url = $"/logs/recent?lines={SelectedLineCount}";
+        if (!string.IsNullOrWhiteSpace(SelectedFile))
+            url += $"&file={Uri.EscapeDataString(SelectedFile)}";
+
+        var result = await client.GetFromJsonAsync<LogsResponseDto>(url);
+
+        LogLines = result?.Lines ?? new();
+        AvailableFiles = result?.Files ?? new();
+
+        if (string.IsNullOrWhiteSpace(SelectedFile))
+            SelectedFile = result?.File;
+
+        // 👇 Espera a renderizar
+        await InvokeAsync(StateHasChanged);
+
+        // 👇 control de scroll
+        _pendingScroll = true;
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingScroll)
         {
-            IsLoading = true;
-            ErrorMessage = null;
-
-            var client = HttpClientFactory.CreateClient("Agent");
-
-            var url = $"/logs/recent?lines={SelectedLineCount}";
-            if (!string.IsNullOrWhiteSpace(SelectedFile))
-            {
-                url += $"&file={Uri.EscapeDataString(SelectedFile)}";
-            }
-
-            var result = await client.GetFromJsonAsync<LogsResponseDto>(url);
-
-            if (result == null)
-            {
-                ErrorMessage = "No response from agent.";
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(result.Error))
-            {
-                ErrorMessage = result.Error;
-                return;
-            }
-
-            CurrentFile = result.File;
-            CurrentLogsDir = result.LogsDir;
-            LogLines = result.Lines ?? new List<string>();
-            AvailableFiles = result.Files ?? new List<string>();
-
-            if (string.IsNullOrWhiteSpace(SelectedFile) && !string.IsNullOrWhiteSpace(CurrentFile))
-            {
-                SelectedFile = CurrentFile;
-            }
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = $"Error loading logs: {ex.Message}";
-        }
-        finally
-        {
-            IsLoading = false;
-            await InvokeAsync(StateHasChanged);
+            _pendingScroll = false;
+            await JS.InvokeVoidAsync("logsAutoScroll");
         }
     }
 
@@ -156,10 +121,6 @@ else if (FilteredLogLines.Count > 0)
         {
             AutoRefreshEnabled = false;
             _cts?.Cancel();
-            _timer?.Dispose();
-            _cts?.Dispose();
-            _cts = null;
-            _timer = null;
             return;
         }
 
@@ -169,60 +130,26 @@ else if (FilteredLogLines.Count > 0)
 
         try
         {
-            while (AutoRefreshEnabled &&
-                   _timer != null &&
-                   await _timer.WaitForNextTickAsync(_cts.Token))
+            while (await _timer.WaitForNextTickAsync(_cts.Token))
             {
                 await LoadLogsAsync();
+                await InvokeAsync(StateHasChanged);
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch { }
     }
 
     private void DownloadCurrentLog()
     {
         var baseUrl = Configuration["Agent:BaseUrl"]?.TrimEnd('/');
-        var apiKey = Configuration["Agent:ApiKey"];
-
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            ErrorMessage = "Agent BaseUrl is not configured.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SelectedFile))
-        {
-            ErrorMessage = "No log file selected.";
-            return;
-        }
-
-        // Ojo: como la descarga por navegador no manda x-api-key fácil,
-        // este endpoint idealmente debería ir sin auth o con token temporal.
-        // De momento abrimos la URL directa solo para probar.
-        var url = $"{baseUrl}/logs/download?file={Uri.EscapeDataString(SelectedFile)}";
-        Navigation.NavigateTo(url, forceLoad: true);
+        var url = $"{baseUrl}/logs/download?file={Uri.EscapeDataString(SelectedFile ?? "")}";
+        Navigation.NavigateTo(url, true);
     }
 
     private static string GetLogCssClass(string line)
     {
-        if (line.Contains("[ERR]") || line.Contains("Error", StringComparison.OrdinalIgnoreCase))
-            return "log-line log-error";
-
-        if (line.Contains("[WRN]") || line.Contains("Warning", StringComparison.OrdinalIgnoreCase))
-            return "log-line log-warning";
-
-        if (line.Contains("[INF]"))
-            return "log-line log-info";
-
-        return "log-line";
-    }
-
-    public void Dispose()
-    {
-        _cts?.Cancel();
-        _timer?.Dispose();
-        _cts?.Dispose();
+        if (line.Contains("[ERR]")) return "log-line log-error";
+        if (line.Contains("[WRN]")) return "log-line log-warning";
+        return "log-line log-info";
     }
 }

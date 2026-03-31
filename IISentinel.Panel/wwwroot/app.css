@@ -59,52 +59,65 @@ h1:focus {
     text-align: start;
 }
 
-.log-console {
-    background: #0f172a;
-    color: #e5e7eb;
-    border-radius: 10px;
-    padding: 16px;
-    min-height: 420px;
-    max-height: 620px;
-    overflow-y: auto;
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 0.9rem;
-    white-space: pre-wrap;
-    word-break: break-word;
+.log-meta {
+    margin-bottom: 12px;
+    color: rgba(148,163,184,.8);
+    font-size: .85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* FULL SCREEN LOGS */
+.logs-page {
+    height: calc(100vh - 20px);
+    display: flex;
+    flex-direction: column;
+    padding: 10px 16px 16px;
+}
+
+/* TOP BAR */
+.logs-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+/* DARK SELECT */
+.dark-select {
+    background: #020617;
+    color: #e2e8f0;
     border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 6px 10px;
 }
 
-.log-line {
-    margin-bottom: 4px;
-}
-
-.log-filter {
-    max-width: 280px;
-}
-
-.log-select {
-    width: 140px;
-}
-
-.log-console {
-    background: #0f172a;
-    color: #e5e7eb;
-    border-radius: 10px;
-    padding: 16px;
-    min-height: 420px;
-    max-height: 620px;
-    overflow-y: auto;
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 0.9rem;
-    white-space: pre-wrap;
-    word-break: break-word;
+/* DARK INPUT */
+.dark-input {
+    background: #020617;
+    color: #e2e8f0;
     border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 6px 10px;
+    min-width: 180px;
 }
 
+/* CONSOLE FULL HEIGHT */
+.logs-console {
+    flex: 1;
+    background: #000814;
+    border-radius: 10px;
+    padding: 10px;
+    overflow-y: auto;
+    font-family: Consolas, monospace;
+    font-size: .82rem;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+/* LINES */
 .log-line {
-    margin-bottom: 4px;
-    padding: 2px 6px;
-    border-radius: 4px;
+    margin-bottom: 2px;
 }
 
 .log-info {
@@ -113,12 +126,10 @@ h1:focus {
 
 .log-warning {
     color: #facc15;
-    background: rgba(250, 204, 21, 0.08);
 }
 
 .log-error {
     color: #f87171;
-    background: rgba(248, 113, 113, 0.08);
 }
 /* IISEntinel premium theme additions */
 :root {
