@@ -32,6 +32,7 @@ app.MapRazorComponents<IISEntinel.Central.Components.App>()
 
 app.MapAgentEndpoints();
 app.MapAgentManagementEndpoints();
+app.MapAgentActionEndpoints();
 
 app.MapPost("/api/agents/{id:guid}/approve", async (Guid id, CentralDbContext db) =>
 {

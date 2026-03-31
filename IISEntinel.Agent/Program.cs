@@ -13,6 +13,8 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenAnyIP(5261);
 });
 
+const string AgentVersion = "0.1.0";
+
 // =========================
 // Serilog
 // =========================
@@ -492,6 +494,7 @@ catch (Exception ex)
 }
 
 await StartHeartbeatLoopAsync(centralOptions);
+await StartCommandPollingLoopAsync(centralOptions);
 
 try
 {
@@ -527,7 +530,7 @@ static async Task TryEnrollWithCentralAsync(CentralOptions centralOptions)
         AgentIdentifier = identity.AgentIdentifier,
         Hostname = hostname,
         Fqdn = fqdn,
-        AgentVersion = "0.1.0"
+        AgentVersion = AgentVersion
     };
 
     using var handler = new HttpClientHandler
@@ -624,7 +627,7 @@ static async Task SendHeartbeatAsync(CentralOptions centralOptions)
     var request = new AgentHeartbeatRequest
     {
         AgentIdentifier = identity.AgentIdentifier,
-        AgentVersion = "0.1.0"
+        AgentVersion = AgentVersion
     };
 
     var response = await client.PostAsJsonAsync("/api/agents/heartbeat", request);
@@ -697,6 +700,174 @@ static string GetFqdn()
     catch
     {
         return Environment.MachineName;
+    }
+}
+
+static Task StartCommandPollingLoopAsync(CentralOptions centralOptions)
+{
+    _ = Task.Run(async () =>
+    {
+        while (true)
+        {
+            try
+            {
+                await PollAndExecuteNextCommandAsync(centralOptions);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Command polling loop iteration failed.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+    });
+
+    return Task.CompletedTask;
+}
+
+static async Task PollAndExecuteNextCommandAsync(CentralOptions centralOptions)
+{
+    if (string.IsNullOrWhiteSpace(centralOptions.BaseUrl))
+    {
+        Log.Warning("Command polling skipped: Central:BaseUrl is missing.");
+        return;
+    }
+
+    var identity = await LoadOrCreateIdentityAsync();
+
+    using var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
+    using var client = new HttpClient(handler)
+    {
+        BaseAddress = new Uri(centralOptions.BaseUrl),
+        Timeout = TimeSpan.FromSeconds(20)
+    };
+
+    var response = await client.GetAsync($"/api/agents/{identity.AgentIdentifier}/actions/next");
+
+    if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        return;
+
+    var responseText = await response.Content.ReadAsStringAsync();
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Log.Warning("Command polling rejected. StatusCode={StatusCode} Response={Response}",
+            (int)response.StatusCode, responseText);
+        return;
+    }
+
+    var command = JsonSerializer.Deserialize<AgentCommandDto>(responseText,
+        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+    if (command is null)
+    {
+        Log.Warning("Command polling returned invalid JSON. Response={Response}", responseText);
+        return;
+    }
+
+    Log.Information("Received command from Central. ActionId={ActionId} ActionType={ActionType} Target={Target}",
+        command.Id, command.ActionType, command.TargetName);
+
+    try
+    {
+        var resultMessage = ExecuteLocalCommand(command);
+
+        var completeResponse = await client.PostAsJsonAsync(
+            $"/api/agents/{identity.AgentIdentifier}/actions/{command.Id}/complete",
+            new AgentActionResultRequest
+            {
+                ResultMessage = resultMessage
+            });
+
+        if (!completeResponse.IsSuccessStatusCode)
+        {
+            var completeText = await completeResponse.Content.ReadAsStringAsync();
+            Log.Warning("Complete callback failed. StatusCode={StatusCode} Response={Response}",
+                (int)completeResponse.StatusCode, completeText);
+            return;
+        }
+
+        Log.Information("Command completed successfully. ActionId={ActionId}", command.Id);
+    }
+    catch (Exception ex)
+    {
+        var failResponse = await client.PostAsJsonAsync(
+            $"/api/agents/{identity.AgentIdentifier}/actions/{command.Id}/fail",
+            new AgentActionResultRequest
+            {
+                Error = ex.ToString(),
+                ResultMessage = ex.Message
+            });
+
+        if (!failResponse.IsSuccessStatusCode)
+        {
+            var failText = await failResponse.Content.ReadAsStringAsync();
+            Log.Warning("Fail callback failed. StatusCode={StatusCode} Response={Response}",
+                (int)failResponse.StatusCode, failText);
+        }
+
+        Log.Warning(ex, "Command failed. ActionId={ActionId}", command.Id);
+    }
+}
+
+static string ExecuteLocalCommand(AgentCommandDto command)
+{
+    using var serverManager = new ServerManager();
+
+    switch (command.ActionType)
+    {
+        case "AppPoolRecycle":
+            {
+                var pool = serverManager.ApplicationPools[command.TargetName]
+                    ?? throw new InvalidOperationException($"App pool '{command.TargetName}' not found.");
+
+                pool.Recycle();
+                return $"Recycled app pool '{command.TargetName}'.";
+            }
+
+        case "AppPoolStart":
+            {
+                var pool = serverManager.ApplicationPools[command.TargetName]
+                    ?? throw new InvalidOperationException($"App pool '{command.TargetName}' not found.");
+
+                var result = pool.Start();
+                return $"Start attempted for app pool '{command.TargetName}'. Result={result}";
+            }
+
+        case "AppPoolStop":
+            {
+                var pool = serverManager.ApplicationPools[command.TargetName]
+                    ?? throw new InvalidOperationException($"App pool '{command.TargetName}' not found.");
+
+                var result = pool.Stop();
+                return $"Stop attempted for app pool '{command.TargetName}'. Result={result}";
+            }
+
+        case "SiteStart":
+            {
+                var site = serverManager.Sites[command.TargetName]
+                    ?? throw new InvalidOperationException($"Site '{command.TargetName}' not found.");
+
+                var result = site.Start();
+                return $"Start attempted for site '{command.TargetName}'. Result={result}";
+            }
+
+        case "SiteStop":
+            {
+                var site = serverManager.Sites[command.TargetName]
+                    ?? throw new InvalidOperationException($"Site '{command.TargetName}' not found.");
+
+                var result = site.Stop();
+                return $"Stop attempted for site '{command.TargetName}'. Result={result}";
+            }
+
+        default:
+            throw new InvalidOperationException($"Unsupported action type '{command.ActionType}'.");
     }
 }
 
