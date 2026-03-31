@@ -87,7 +87,7 @@ app.Use(async (context, next) =>
 // =========================
 // Logs
 // =========================
-app.MapGet("/logs/recent", () =>
+app.MapGet("/logs/recent", (int? lines, string? file) =>
 {
     try
     {
@@ -115,25 +115,40 @@ app.MapGet("/logs/recent", () =>
             });
         }
 
-        var latestFile = files.First();
+        var selectedLines = lines.GetValueOrDefault(100);
+        if (selectedLines <= 0)
+            selectedLines = 100;
 
-        List<string> lines;
+        string latestFile;
+
+        if (!string.IsNullOrWhiteSpace(file))
+        {
+            latestFile = files.FirstOrDefault(f =>
+                string.Equals(Path.GetFileName(f), file, StringComparison.OrdinalIgnoreCase))
+                ?? files.First();
+        }
+        else
+        {
+            latestFile = files.First();
+        }
+
+        List<string> logLines;
         using (var stream = new FileStream(latestFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         using (var reader = new StreamReader(stream))
         {
             var content = reader.ReadToEnd();
-            lines = content
+            logLines = content
                 .Split(Environment.NewLine, StringSplitOptions.None)
-                .TakeLast(100)
+                .TakeLast(selectedLines)
                 .ToList();
         }
 
         return Results.Ok(new
         {
             LogsDir = logsDir,
-            File = latestFile,
+            File = Path.GetFileName(latestFile),
             Files = files.Select(Path.GetFileName).ToList(),
-            Lines = lines
+            Lines = logLines
         });
     }
     catch (Exception ex)
@@ -143,6 +158,39 @@ app.MapGet("/logs/recent", () =>
             Error = ex.ToString(),
             LogsDir = logsDir
         });
+    }
+});
+
+app.MapGet("/logs/download", (string? file) =>
+{
+    try
+    {
+        if (!Directory.Exists(logsDir))
+            return Results.NotFound("Logs folder not found");
+
+        var files = Directory.GetFiles(logsDir, "iissentinel-*.log")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ToList();
+
+        if (files.Count == 0)
+            return Results.NotFound("No log files");
+
+        var selectedFile = !string.IsNullOrWhiteSpace(file)
+            ? files.FirstOrDefault(f => string.Equals(Path.GetFileName(f), file, StringComparison.OrdinalIgnoreCase))
+            : files.First();
+
+        if (selectedFile == null)
+            return Results.NotFound("Requested log file not found");
+
+        return Results.File(
+            selectedFile,
+            "text/plain",
+            Path.GetFileName(selectedFile));
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Error downloading log file");
+        return Results.Problem(ex.ToString());
     }
 });
 

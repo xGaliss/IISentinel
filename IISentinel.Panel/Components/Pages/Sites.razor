@@ -1,0 +1,134 @@
+﻿@page "/sites"
+@using IISentinel.Panel.Models
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Sites</PageTitle>
+
+<h1>Sites</h1>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger">@ErrorMessage</div>
+}
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="LoadSitesAsync" disabled="@IsLoading">
+        @(IsLoading ? "Loading..." : "Refresh")
+    </button>
+</div>
+
+@if (SitesList.Count == 0 && !IsLoading && string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <p>No sites found.</p>
+}
+else if (SitesList.Count > 0)
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th>Bindings</th>
+                <th style="width: 220px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var site in SitesList)
+            {
+                <tr>
+                    <td>@site.Name</td>
+                    <td>@site.State</td>
+                    <td>
+                        @if (site.Bindings?.Count > 0)
+                        {
+                            <ul class="mb-0">
+                                @foreach (var binding in site.Bindings)
+                                {
+                                    <li>@binding</li>
+                                }
+                            </ul>
+                        }
+                    </td>
+                    <td>
+                        <button class="btn btn-success btn-sm me-2"
+                                @onclick="() => StartSiteAsync(site.Name)">
+                            Start
+                        </button>
+
+                        <button class="btn btn-warning btn-sm"
+                                @onclick="() => StopSiteAsync(site.Name)">
+                            Stop
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<SiteDto> SitesList { get; set; } = new();
+    private bool IsLoading { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSitesAsync();
+    }
+
+    private async Task LoadSitesAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+
+            var client = HttpClientFactory.CreateClient("Agent");
+            var result = await client.GetFromJsonAsync<List<SiteDto>>("/sites");
+
+            SitesList = result ?? new List<SiteDto>();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading sites: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task StartSiteAsync(string name)
+    {
+        await PostActionAsync($"/sites/{Uri.EscapeDataString(name)}/start");
+    }
+
+    private async Task StopSiteAsync(string name)
+    {
+        await PostActionAsync($"/sites/{Uri.EscapeDataString(name)}/stop");
+    }
+
+    private async Task PostActionAsync(string url)
+    {
+        try
+        {
+            ErrorMessage = null;
+
+            var client = HttpClientFactory.CreateClient("Agent");
+            var response = await client.PostAsync(url, content: null);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                ErrorMessage = $"Action failed: {(int)response.StatusCode} - {body}";
+                return;
+            }
+
+            await LoadSitesAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Action error: {ex.Message}";
+        }
+    }
+}

@@ -58,3 +58,66 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+.log-console {
+    background: #0f172a;
+    color: #e5e7eb;
+    border-radius: 10px;
+    padding: 16px;
+    min-height: 420px;
+    max-height: 620px;
+    overflow-y: auto;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.log-line {
+    margin-bottom: 4px;
+}
+
+.log-filter {
+    max-width: 280px;
+}
+
+.log-select {
+    width: 140px;
+}
+
+.log-console {
+    background: #0f172a;
+    color: #e5e7eb;
+    border-radius: 10px;
+    padding: 16px;
+    min-height: 420px;
+    max-height: 620px;
+    overflow-y: auto;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.log-line {
+    margin-bottom: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.log-info {
+    color: #cbd5e1;
+}
+
+.log-warning {
+    color: #facc15;
+    background: rgba(250, 204, 21, 0.08);
+}
+
+.log-error {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.08);
+}ound: rgba(248, 113, 113, 0.08);
+}
