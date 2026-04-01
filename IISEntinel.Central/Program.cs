@@ -47,6 +47,7 @@ app.MapAgentEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapAgentActionEndpoints();
 app.MapAgentInventoryEndpoints();
+app.MapAgentLogEndpoints();
 
 using (var scope = app.Services.CreateScope())
 {
