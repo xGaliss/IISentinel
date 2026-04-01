@@ -4,7 +4,6 @@ using Serilog;
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using IISEntinel.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -49,6 +48,8 @@ builder.Services.Configure<CentralOptions>(
 
 builder.Services.Configure<AgentLogShippingOptions>(
     builder.Configuration.GetSection("LogShipping"));
+
+builder.Services.AddSingleton<IAgentLogShippingService, AgentLogShippingService>();
 
 var app = builder.Build();
 
@@ -501,7 +502,7 @@ catch (Exception ex)
 await StartHeartbeatLoopAsync(centralOptions);
 await StartCommandPollingLoopAsync(centralOptions);
 await StartInventorySyncLoopAsync(centralOptions);
-await StartLogShippingLoopAsync(centralOptions, logShippingOptions, logsDir);
+await StartLogShippingLoopAsync(app.Services, logShippingOptions);
 
 try
 {
@@ -906,10 +907,7 @@ static async Task SyncInventoryAsync(CentralOptions centralOptions)
         identity.AgentIdentifier, request.AppPools.Count, request.Sites.Count);
 }
 
-static Task StartLogShippingLoopAsync(
-    CentralOptions centralOptions,
-    AgentLogShippingOptions options,
-    string logsDir)
+static Task StartLogShippingLoopAsync(IServiceProvider services, AgentLogShippingOptions options)
 {
     if (!options.Enabled)
     {
@@ -919,11 +917,14 @@ static Task StartLogShippingLoopAsync(
 
     _ = Task.Run(async () =>
     {
+        using var scope = services.CreateScope();
+        var shipper = scope.ServiceProvider.GetRequiredService<IAgentLogShippingService>();
+
         while (true)
         {
             try
             {
-                await ShipLogsAsync(centralOptions, options, logsDir);
+                await shipper.PushRecentLogsAsync();
             }
             catch (Exception ex)
             {
@@ -938,224 +939,6 @@ static Task StartLogShippingLoopAsync(
         options.IntervalSeconds, options.BatchSize);
 
     return Task.CompletedTask;
-}
-
-static async Task ShipLogsAsync(
-    CentralOptions centralOptions,
-    AgentLogShippingOptions options,
-    string logsDir)
-{
-    if (string.IsNullOrWhiteSpace(centralOptions.BaseUrl))
-        return;
-
-    if (!Directory.Exists(logsDir))
-        return;
-
-    var identity = await LoadOrCreateIdentityAsync();
-    if (identity.AgentId is null || identity.AgentId == Guid.Empty)
-    {
-        Log.Warning("Log shipping skipped: AgentId is missing in local identity.");
-        return;
-    }
-
-    var latestFile = Directory.GetFiles(logsDir, "iissentinel-*.log")
-        .OrderByDescending(File.GetLastWriteTimeUtc)
-        .FirstOrDefault();
-
-    if (string.IsNullOrWhiteSpace(latestFile) || !File.Exists(latestFile))
-        return;
-
-    var statePath = Path.IsPathRooted(options.StateFilePath)
-        ? options.StateFilePath
-        : Path.Combine(AppContext.BaseDirectory, options.StateFilePath);
-
-    var state = await LoadLogShippingStateAsync(statePath, latestFile);
-
-    var fileInfo = new FileInfo(latestFile);
-    if (!string.Equals(state.FilePath, latestFile, StringComparison.OrdinalIgnoreCase) ||
-        state.LastPosition > fileInfo.Length)
-    {
-        state = new AgentLogShippingState
-        {
-            FilePath = latestFile,
-            LastPosition = 0,
-            UpdatedUtc = DateTime.UtcNow
-        };
-    }
-
-    var entries = new List<AgentLogEntryDto>();
-    long newPosition;
-
-    using (var stream = new FileStream(latestFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-    using (var reader = new StreamReader(stream))
-    {
-        stream.Seek(state.LastPosition, SeekOrigin.Begin);
-
-        while (!reader.EndOfStream && entries.Count < options.BatchSize)
-        {
-            var line = await reader.ReadLineAsync();
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-
-            var parsed = ParseLogLine(line);
-            if (parsed is not null)
-                entries.Add(parsed);
-        }
-
-        newPosition = stream.Position;
-    }
-
-    if (entries.Count == 0)
-        return;
-
-    using var handler = new HttpClientHandler
-    {
-        ServerCertificateCustomValidationCallback =
-            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-    };
-
-    using var client = new HttpClient(handler)
-    {
-        BaseAddress = new Uri(centralOptions.BaseUrl),
-        Timeout = TimeSpan.FromSeconds(20)
-    };
-
-    var response = await client.PostAsJsonAsync(
-        $"/api/agents/{identity.AgentId.Value}/logs/batch",
-        new AgentLogBatchRequest
-        {
-            Entries = entries
-        });
-
-    var responseText = await response.Content.ReadAsStringAsync();
-
-    if (!response.IsSuccessStatusCode)
-    {
-        Log.Warning("Log shipping rejected. StatusCode={StatusCode} Response={Response}",
-            (int)response.StatusCode, responseText);
-        return;
-    }
-
-    state.FilePath = latestFile;
-    state.LastPosition = newPosition;
-    state.UpdatedUtc = DateTime.UtcNow;
-
-    await SaveLogShippingStateAsync(statePath, state);
-
-    Log.Information("Log shipping sent successfully. AgentId={AgentId} Entries={Count}",
-        identity.AgentId.Value, entries.Count);
-}
-
-static readonly Regex LogLineRegex = new(
-    @"^(?<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?<lvl>[A-Z]{3})\]\s+(?<msg>.*)$",
-    RegexOptions.Compiled);
-
-static AgentLogEntryDto? ParseLogLine(string line)
-{
-    var match = LogLineRegex.Match(line);
-    if (!match.Success)
-        return null;
-
-    if (!DateTime.TryParse(match.Groups["ts"].Value, out var timestamp))
-        return null;
-
-    var message = match.Groups["msg"].Value;
-
-    return new AgentLogEntryDto
-    {
-        TimestampUtc = DateTime.SpecifyKind(timestamp, DateTimeKind.Local).ToUniversalTime(),
-        Level = match.Groups["lvl"].Value,
-        Category = InferLogCategory(message),
-        Message = message,
-        EventType = InferLogEventType(message),
-        CorrelationId = null
-    };
-}
-
-static string InferLogCategory(string message)
-{
-    if (message.Contains("Heartbeat", StringComparison.OrdinalIgnoreCase))
-        return "Heartbeat";
-
-    if (message.Contains("Inventory", StringComparison.OrdinalIgnoreCase))
-        return "Inventory";
-
-    if (message.Contains("Command", StringComparison.OrdinalIgnoreCase))
-        return "Command";
-
-    if (message.Contains("Auto-heal", StringComparison.OrdinalIgnoreCase))
-        return "AutoHeal";
-
-    if (message.Contains("enrollment", StringComparison.OrdinalIgnoreCase))
-        return "Enrollment";
-
-    return "Agent";
-}
-
-static string? InferLogEventType(string message)
-{
-    if (message.Contains("sent successfully", StringComparison.OrdinalIgnoreCase))
-        return "Success";
-
-    if (message.Contains("completed successfully", StringComparison.OrdinalIgnoreCase))
-        return "Success";
-
-    if (message.Contains("failed", StringComparison.OrdinalIgnoreCase))
-        return "Failure";
-
-    if (message.Contains("timed out", StringComparison.OrdinalIgnoreCase))
-        return "Timeout";
-
-    return null;
-}
-
-static async Task<AgentLogShippingState> LoadLogShippingStateAsync(string statePath, string currentFile)
-{
-    try
-    {
-        if (!File.Exists(statePath))
-        {
-            return new AgentLogShippingState
-            {
-                FilePath = currentFile,
-                LastPosition = 0,
-                UpdatedUtc = DateTime.UtcNow
-            };
-        }
-
-        var json = await File.ReadAllTextAsync(statePath);
-        var state = JsonSerializer.Deserialize<AgentLogShippingState>(json);
-
-        return state ?? new AgentLogShippingState
-        {
-            FilePath = currentFile,
-            LastPosition = 0,
-            UpdatedUtc = DateTime.UtcNow
-        };
-    }
-    catch
-    {
-        return new AgentLogShippingState
-        {
-            FilePath = currentFile,
-            LastPosition = 0,
-            UpdatedUtc = DateTime.UtcNow
-        };
-    }
-}
-
-static async Task SaveLogShippingStateAsync(string statePath, AgentLogShippingState state)
-{
-    var dir = Path.GetDirectoryName(statePath);
-    if (!string.IsNullOrWhiteSpace(dir))
-        Directory.CreateDirectory(dir);
-
-    var json = JsonSerializer.Serialize(state, new JsonSerializerOptions
-    {
-        WriteIndented = true
-    });
-
-    await File.WriteAllTextAsync(statePath, json);
 }
 
 static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
