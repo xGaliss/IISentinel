@@ -46,6 +46,11 @@ builder.Services.Configure<AutoHealOptions>(
 builder.Services.Configure<CentralOptions>(
     builder.Configuration.GetSection("Central"));
 
+builder.Services.Configure<AgentLogShippingOptions>(
+    builder.Configuration.GetSection("LogShipping"));
+
+builder.Services.AddSingleton<IAgentLogShippingService, AgentLogShippingService>();
+
 var app = builder.Build();
 
 var apiKey = builder.Configuration["ApiKey"]
@@ -53,6 +58,7 @@ var apiKey = builder.Configuration["ApiKey"]
 
 var autoHealOptions = app.Services.GetRequiredService<IOptions<AutoHealOptions>>().Value;
 var centralOptions = app.Services.GetRequiredService<IOptions<CentralOptions>>().Value;
+var logShippingOptions = app.Services.GetRequiredService<IOptions<AgentLogShippingOptions>>().Value;
 
 // Historial simple en memoria para cooldown por pool
 var healTracker = new ConcurrentDictionary<string, HealState>();
@@ -496,6 +502,7 @@ catch (Exception ex)
 await StartHeartbeatLoopAsync(centralOptions);
 await StartCommandPollingLoopAsync(centralOptions);
 await StartInventorySyncLoopAsync(centralOptions);
+await StartLogShippingLoopAsync(app.Services, logShippingOptions);
 
 try
 {
@@ -568,6 +575,9 @@ static async Task TryEnrollWithCentralAsync(CentralOptions centralOptions)
             Log.Warning("Central enrollment returned empty or invalid JSON. Response={Response}", responseText);
             return;
         }
+
+        identity.AgentId = enrollResponse.AgentId;
+        await SaveIdentityAsync(identity);
 
         Log.Information("Central enrollment successful. AgentId={AgentId} Status={Status}",
             enrollResponse.AgentId, enrollResponse.Status);
@@ -896,6 +906,41 @@ static async Task SyncInventoryAsync(CentralOptions centralOptions)
     Log.Information("Inventory sync sent successfully. AgentIdentifier={AgentIdentifier} Pools={PoolCount} Sites={SiteCount}",
         identity.AgentIdentifier, request.AppPools.Count, request.Sites.Count);
 }
+
+static Task StartLogShippingLoopAsync(IServiceProvider services, AgentLogShippingOptions options)
+{
+    if (!options.Enabled)
+    {
+        Log.Information("Log shipping disabled.");
+        return Task.CompletedTask;
+    }
+
+    _ = Task.Run(async () =>
+    {
+        using var scope = services.CreateScope();
+        var shipper = scope.ServiceProvider.GetRequiredService<IAgentLogShippingService>();
+
+        while (true)
+        {
+            try
+            {
+                await shipper.PushRecentLogsAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Log shipping loop iteration failed.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(options.IntervalSeconds));
+        }
+    });
+
+    Log.Information("Log shipping enabled. IntervalSeconds={IntervalSeconds} BatchSize={BatchSize}",
+        options.IntervalSeconds, options.BatchSize);
+
+    return Task.CompletedTask;
+}
+
 static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
 {
     var identityDir = Path.Combine(
@@ -930,17 +975,30 @@ static async Task<AgentIdentity> LoadOrCreateIdentityAsync()
         CreatedUtc = DateTime.UtcNow
     };
 
-    var newJson = JsonSerializer.Serialize(identity, new JsonSerializerOptions
+    await SaveIdentityAsync(identity);
+
+    Log.Information("Created new agent identity. AgentIdentifier={AgentIdentifier}",
+        identity.AgentIdentifier);
+
+    return identity;
+}
+
+static async Task SaveIdentityAsync(AgentIdentity identity)
+{
+    var identityDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "IISEntinel");
+
+    var identityPath = Path.Combine(identityDir, "agent.identity.json");
+
+    Directory.CreateDirectory(identityDir);
+
+    var json = JsonSerializer.Serialize(identity, new JsonSerializerOptions
     {
         WriteIndented = true
     });
 
-    await File.WriteAllTextAsync(identityPath, newJson);
-
-    Log.Information("Created new agent identity. AgentIdentifier={AgentIdentifier} Path={Path}",
-        identity.AgentIdentifier, identityPath);
-
-    return identity;
+    await File.WriteAllTextAsync(identityPath, json);
 }
 
 static string GetFqdn()

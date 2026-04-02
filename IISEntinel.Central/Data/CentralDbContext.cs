@@ -16,6 +16,7 @@ public class CentralDbContext : DbContext
     public DbSet<AgentAppPool> AgentAppPools => Set<AgentAppPool>();
     public DbSet<AgentSite> AgentSites => Set<AgentSite>();
 
+    public DbSet<AgentLogEntry> AgentLogEntries => Set<AgentLogEntry>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -67,5 +68,19 @@ public class CentralDbContext : DbContext
                 .HasForeignKey(x => x.AgentId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<AgentLogEntry>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Level).HasMaxLength(32);
+            entity.Property(x => x.Category).HasMaxLength(128);
+            entity.Property(x => x.EventType).HasMaxLength(64);
+            entity.Property(x => x.CorrelationId).HasMaxLength(128);
+
+            entity.HasIndex(x => new { x.AgentId, x.TimestampUtc });
+            entity.HasIndex(x => new { x.AgentId, x.Level });
+        });
+
     }
 }

@@ -1,6 +1,7 @@
 @page "/agents/{Id:guid}"
 @using System.Net.Http.Json
 @using IISEntinel.Central.Services
+@using IISEntinel.Central.Contracts
 @inject HttpClient Http
 @inject IAgentService AgentService
 @rendermode InteractiveServer
@@ -171,6 +172,71 @@ else
                 </table>
             </div>
         </section>
+
+        <section class="panel">
+            <div class="panel-header panel-header-split">
+                <div>
+                    <div class="panel-title">Agent logs</div>
+                    <div class="panel-subtitle">Persisted logs received from the agent.</div>
+                </div>
+
+                <div class="logs-toolbar">
+                    <button class="btn btn-ghost" @onclick="LoadLogsAsync">Refresh</button>
+
+                    <div class="logs-toolbar-group">
+                        <label class="logs-toolbar-label">Lines</label>
+                        <select class="logs-select" @bind="SelectedLogLineCount">
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="300">300</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </div>
+
+                    <div class="logs-toolbar-group">
+                        <label class="logs-toolbar-label">Level</label>
+                        <select class="logs-select" @bind="SelectedLogLevel">
+                            <option value="">All levels</option>
+                            <option value="INF">Info</option>
+                            <option value="WRN">Warning</option>
+                            <option value="ERR">Error</option>
+                        </select>
+                    </div>
+
+                    <div class="logs-search-wrap">
+                        <span class="logs-search-icon">⌕</span>
+                        <input class="logs-search"
+                               placeholder="Search logs..."
+                               @bind="LogFilterText"
+                               @bind:event="oninput" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="logs-console">
+                @if (IsLogsLoading)
+                {
+                    <div class="log-line log-info">Loading logs...</div>
+                }
+                else if (!string.IsNullOrWhiteSpace(LogsError))
+                {
+                    <div class="log-line log-error">@LogsError</div>
+                }
+                else if (FilteredAgentLogs.Count == 0)
+                {
+                    <div class="log-line log-info">No logs found.</div>
+                }
+                else
+                {
+                    @foreach (var line in FilteredAgentLogs)
+                    {
+                        <div class="@GetLogCssClass(line)">
+                            [@line.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")] [@line.Level] [@line.Category] @line.Message
+                        </div>
+                    }
+                }
+            </div>
+        </section>
     </div>
 }
 
@@ -184,7 +250,22 @@ else
     private List<SiteVm> _sites = new();
     private List<ActionVm> _actions = new();
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private List<AgentLogLineDto> AgentLogs { get; set; } = new();
+    private string LogFilterText { get; set; } = "";
+    private string SelectedLogLevel { get; set; } = "";
+    private int SelectedLogLineCount { get; set; } = 100;
+    private bool IsLogsLoading { get; set; }
+    private string? LogsError { get; set; }
+
+    private List<AgentLogLineDto> FilteredAgentLogs =>
+        AgentLogs
+            .Where(x =>
+                string.IsNullOrWhiteSpace(LogFilterText) ||
+                x.Message.Contains(LogFilterText, StringComparison.OrdinalIgnoreCase) ||
+                x.Category.Contains(LogFilterText, StringComparison.OrdinalIgnoreCase) ||
+                x.Level.Contains(LogFilterText, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -208,7 +289,41 @@ else
         _isOnline = _agent?.LastSeenUtc is not null &&
                     DateTime.UtcNow - _agent.LastSeenUtc.Value <= TimeSpan.FromSeconds(90);
 
+        await LoadLogsAsync();
+
         _loading = false;
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        try
+        {
+            IsLogsLoading = true;
+            LogsError = null;
+            StateHasChanged();
+
+            var url = $"/api/agents/{Id}/logs?take={SelectedLogLineCount}";
+
+            if (!string.IsNullOrWhiteSpace(SelectedLogLevel))
+                url += $"&level={Uri.EscapeDataString(SelectedLogLevel)}";
+
+            if (!string.IsNullOrWhiteSpace(LogFilterText))
+                url += $"&search={Uri.EscapeDataString(LogFilterText)}";
+
+            var result = await Http.GetFromJsonAsync<AgentLogsResponseDto>(url);
+
+            AgentLogs = result?.Lines ?? new List<AgentLogLineDto>();
+        }
+        catch (Exception ex)
+        {
+            LogsError = $"Failed to load logs: {ex.Message}";
+            AgentLogs = new List<AgentLogLineDto>();
+        }
+        finally
+        {
+            IsLogsLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task QueueAsync(string actionType, string targetName)
@@ -225,6 +340,19 @@ else
         "InProgress" => "badge-warning",
         _ => "badge-neutral"
     };
+
+    private static string GetLogCssClass(AgentLogLineDto line)
+    {
+        if (line.Level.Contains("ERR", StringComparison.OrdinalIgnoreCase) ||
+            line.Level.Contains("ERROR", StringComparison.OrdinalIgnoreCase))
+            return "log-line log-error";
+
+        if (line.Level.Contains("WRN", StringComparison.OrdinalIgnoreCase) ||
+            line.Level.Contains("WARNING", StringComparison.OrdinalIgnoreCase))
+            return "log-line log-warning";
+
+        return "log-line log-info";
+    }
 
     private static string FormatDate(DateTime? utc)
         => utc.HasValue ? utc.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "-";
