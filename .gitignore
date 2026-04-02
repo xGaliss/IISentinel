@@ -64,3 +64,8 @@ build/
 *.zip
 *.tar.gz
 *.7z
+
+#DB
+IISEntinel.Central/*.db
+IISEntinel.Central/*.db-shm
+IISEntinel.Central/*.db-wal

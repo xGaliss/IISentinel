@@ -91,7 +91,7 @@ public sealed class AgentLogShippingService : IAgentLogShippingService
                     continue;
 
                 var parsed = ParseLogLine(line);
-                if (parsed is not null)
+                if (parsed is not null && ShouldShipLogEntry(parsed))
                     entries.Add(parsed);
             }
 
@@ -160,6 +160,30 @@ public sealed class AgentLogShippingService : IAgentLogShippingService
             EventType = InferLogEventType(message),
             CorrelationId = null
         };
+    }
+
+    private static bool ShouldShipLogEntry(AgentLogEntryDto entry)
+    {
+        if (entry.Level.Equals("ERR", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (entry.Level.Equals("WRN", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!entry.Level.Equals("INF", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var message = entry.Message;
+
+        return
+            message.Contains("Central enrollment successful", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Central enrollment failed", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Received command from Central", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Command completed successfully", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Command failed", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Auto-heal attempting start", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Auto-heal blocked by cooldown", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Auto-heal start attempted", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string InferLogCategory(string message)
